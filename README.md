@@ -1,0 +1,99 @@
+# Auto Theme
+
+An Omarchy (Quattro) shell plugin that switches between a light and a dark
+theme at sunrise and sunset, with a bar widget for choosing Light, Dark, or
+Auto and for picking which theme — and which of its backgrounds — each mode
+uses.
+
+Applying a mode also updates VS Code, Zed, and the GTK/XDG colour scheme so
+the whole desktop moves together.
+
+## Layout
+
+```
+local.auto-theme/
+├── manifest.json                    plugin declaration
+├── Widget.qml                       bar widget + popup panel
+├── bin/omarchy-auto-theme           engine: sun times, scheduling, theming
+└── systemd/
+    ├── omarchy-auto-theme.service   applies the theme and schedules the next run
+    └── omarchy-auto-theme.timer     hourly safety net
+```
+
+Everything resolves relative to this directory. The QML finds the script via
+`Qt.resolvedUrl`, the script finds its units via `$SCRIPT_DIR`, and the service
+unit uses `%h/.config/omarchy/plugins/local.auto-theme/`.
+
+## Requirements
+
+- `sunwait` for sunrise/sunset times
+- `omarchy-theme-set` (ships with Omarchy)
+
+## Configuration
+
+`~/.config/omarchy/auto-theme/config`:
+
+```bash
+LIGHT_THEME="Flexoki Light"
+DARK_THEME="Matte Black"
+LIGHT_BACKGROUND=""   # filename within the theme; empty lets omarchy cycle
+DARK_BACKGROUND=""
+LOCATION=""           # "LAT LON"; empty auto-detects by IP and caches for 24h
+```
+
+The panel dropdowns write to this file.
+
+## Backgrounds
+
+Omarchy has no notion of a theme's default background: `omarchy-theme-set`
+takes the image one past whatever the previous theme was showing, which never
+matches, so it always lands on the theme's first file. Pinning a background
+here makes a theme come up on the same image every time.
+
+A pin is a filename, resolved against the same directories
+`omarchy-theme-bg-next` searches — `~/.config/omarchy/backgrounds/<theme>/`
+first, then the theme's own `backgrounds/`. Cycling from a pinned image
+therefore continues from it rather than jumping back to the first.
+
+When a background is pinned, the theme is applied with
+`OMARCHY_THEME_SKIP_BACKGROUND=1` and the image set afterwards, so omarchy's
+own choice never flashes on screen first. If the file has since disappeared
+from the theme, it falls back to `omarchy-theme-bg-next`. Changing a slot's
+theme clears its pin, since the filename belonged to the old theme.
+
+## CLI
+
+```bash
+omarchy-auto-theme status         # location, mode, sun times, timer state
+omarchy-auto-theme mode light     # manual override, disables auto
+omarchy-auto-theme enable         # follow the sun
+omarchy-auto-theme disable [mode] # stop following, optionally settle on a mode
+omarchy-auto-theme config light "Catppuccin Latte"
+omarchy-auto-theme config dark-bg "1-dark-waters.jpg"   # "" to unpin
+omarchy-auto-theme backgrounds dark                     # what that theme offers
+omarchy-auto-theme panel-json     # state consumed by the panel
+```
+
+## How the panel stays current
+
+The script pushes state after applying a change:
+
+```bash
+omarchy-shell -q local.auto-theme refresh
+```
+
+`Widget.qml` replaces `Panel`'s built-in IPC handler (`manageIpc: false`) to
+expose `refresh` alongside `open`/`close`/`toggle` — the base only provides the
+latter, so without this the push is silently dropped and the panel falls back to
+its 60s poll. Clicks also paint optimistically, so the control never lags.
+
+## Extracting to its own repository
+
+This directory is the whole product; copy it to a new repo root and it installs
+with `omarchy plugin add <git-url>`. Before publishing:
+
+- rename the id off the `local.` prefix (`manifest.json` `id`, plus `moduleName`
+  and `ipcTarget` in `Widget.qml`, the `refresh_widget` target in the script,
+  and the path in the service unit)
+- add a LICENSE
+- declare the `sunwait` dependency

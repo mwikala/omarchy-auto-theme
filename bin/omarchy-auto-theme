@@ -1,0 +1,629 @@
+#!/bin/bash
+
+# Auto theme switcher based on sunrise/sunset
+# Config: ~/.config/omarchy/auto-theme/config
+
+CONFIG_DIR="$HOME/.config/omarchy/auto-theme"
+CONFIG_FILE="$CONFIG_DIR/config"
+CACHE_FILE="$CONFIG_DIR/location.cache"
+STATE_DIR="$HOME/.local/state/omarchy/current"
+OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+IMAGE_TYPES=(-iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.bmp' -o -iname '*.webp')
+TIMER="omarchy-auto-theme.timer"
+NEXT_TIMER="omarchy-auto-theme-next.timer"
+SELF=$(readlink -f "$0")
+SCRIPT_DIR=$(dirname "$SELF")
+# Units ship inside the plugin; systemctl --user link pulls them in from here.
+TIMER_FILE="$SCRIPT_DIR/../systemd/$TIMER"
+TIMER_WANTS="$HOME/.config/systemd/user/timers.target.wants/$TIMER"
+
+source "$CONFIG_FILE"
+
+get_location() {
+    if [[ -n "$LOCATION" ]]; then
+        echo "$LOCATION"
+        return
+    fi
+
+    # Use cached location if fresh (less than 24h old)
+    if [[ -f "$CACHE_FILE" ]]; then
+        local age=$(($(date +%s) - $(stat -c %Y "$CACHE_FILE")))
+        if [[ $age -lt 86400 ]]; then
+            cat "$CACHE_FILE"
+            return
+        fi
+    fi
+
+    # Auto-detect via IP geolocation
+    local geo=$(curl -sf --max-time 5 "http://ip-api.com/json/?fields=lat,lon" 2>/dev/null)
+    if [[ -n "$geo" ]]; then
+        local lat=$(echo "$geo" | grep -o '"lat":[0-9.-]*' | cut -d: -f2)
+        local lon=$(echo "$geo" | grep -o '"lon":[0-9.-]*' | cut -d: -f2)
+        if [[ -n "$lat" && -n "$lon" ]]; then
+            echo "$lat $lon" | tee "$CACHE_FILE"
+            return
+        fi
+    fi
+
+    # Fallback to London
+    echo "51.5074 -0.1278"
+}
+
+format_coords() {
+    local loc=$(get_location)
+    local lat=$(echo "$loc" | awk '{print $1}')
+    local lon=$(echo "$loc" | awk '{print $2}')
+    
+    local lat_dir="N"
+    local lon_dir="E"
+    
+    if [[ "$lat" == -* ]]; then
+        lat_dir="S"
+        lat="${lat#-}"
+    fi
+    
+    if [[ "$lon" == -* ]]; then
+        lon_dir="W"
+        lon="${lon#-}"
+    fi
+    
+    echo "${lat}${lat_dir} ${lon}${lon_dir}"
+}
+
+is_daytime() {
+    local coords=$(format_coords)
+    local result=$(sunwait poll $coords 2>/dev/null)
+    
+    # Fallback: if sunwait fails, check time against cached sunrise/sunset
+    if [[ -z "$result" ]]; then
+        local now=$(date +%H:%M)
+        local sunrise=$(sunwait list rise $coords 2>/dev/null)
+        local sunset=$(sunwait list set $coords 2>/dev/null)
+        [[ -n "$sunrise" && -n "$sunset" && "$now" > "$sunrise" && "$now" < "$sunset" ]]
+        return
+    fi
+    
+    [[ "$result" == "DAY" ]]
+}
+
+get_sun_time() {
+    local event=$1
+    local coords=$(format_coords)
+    sunwait list $event $coords 2>/dev/null
+}
+
+theme_for() { [[ "$1" == light ]] && echo "$LIGHT_THEME" || echo "$DARK_THEME"; }
+background_for() { [[ "$1" == light ]] && echo "$LIGHT_BACKGROUND" || echo "$DARK_BACKGROUND"; }
+theme_var() { [[ "$1" == light ]] && echo LIGHT_THEME || echo DARK_THEME; }
+background_var() { [[ "$1" == light ]] && echo LIGHT_BACKGROUND || echo DARK_BACKGROUND; }
+
+theme_slug() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-'
+}
+
+# Mirrors the search order in omarchy-theme-bg-next, so a pinned background is a
+# path that script recognises and keeps cycling from, rather than an unknown one
+# that sends it back to the first image.
+background_dirs() {
+    local slug="$1"
+
+    echo "$HOME/.config/omarchy/backgrounds/$slug"
+    [[ "$(cat "$STATE_DIR/theme.name" 2>/dev/null)" == "$slug" ]] && echo "$STATE_DIR/theme/backgrounds"
+    echo "$HOME/.config/omarchy/themes/$slug/backgrounds"
+    echo "$OMARCHY_PATH/themes/$slug/backgrounds"
+}
+
+background_list() {
+    local dirs=()
+    mapfile -t dirs < <(background_dirs "$1")
+
+    find -L "${dirs[@]}" -maxdepth 1 -type f \( "${IMAGE_TYPES[@]}" \) -printf '%f\n' 2>/dev/null | sort -u
+}
+
+background_path() {
+    local slug="$1" name="$2" dir
+
+    [[ -n "$name" ]] || return 1
+
+    while read -r dir; do
+        if [[ -f "$dir/$name" ]]; then
+            echo "$dir/$name"
+            return 0
+        fi
+    done < <(background_dirs "$slug")
+
+    return 1
+}
+
+apply_background() {
+    local path
+
+    path=$(background_path "$1" "$2") || return 1
+    omarchy-theme-bg-set "$path" >/dev/null
+}
+
+# Pinning a background for the theme already on screen should show immediately
+# instead of waiting for the next switch.
+preview_background() {
+    local slug=$(theme_slug "$(theme_for "$1")")
+
+    [[ "$(cat "$STATE_DIR/theme.name" 2>/dev/null)" == "$slug" ]] || return 0
+    apply_background "$slug" "$(background_for "$1")"
+}
+
+set_vscode_theme() {
+    local mode="$1"
+    local settings_file="$2"
+    
+    [[ -f "$settings_file" ]] || return
+    
+    local pref_key="preferredDarkColorTheme"
+    [[ "$mode" == "light" ]] && pref_key="preferredLightColorTheme"
+    
+    local theme=$(grep -o "\"workbench\.$pref_key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$settings_file" | sed 's/.*: *"\([^"]*\)".*/\1/')
+    [[ -z "$theme" ]] && return
+    
+    sed -i --follow-symlinks -E "s/(\"workbench\.colorTheme\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\1$theme\2/" "$settings_file"
+}
+
+set_zed_theme() {
+    local mode="$1"
+    local settings_file="$2"
+
+    [[ -f "$settings_file" ]] || return
+
+    sed -i --follow-symlinks -E '/"theme"[[:space:]]*:[[:space:]]*\{/,/[[:space:]]*\}[[:space:]]*,?[[:space:]]*$/ s/("mode"[[:space:]]*:[[:space:]]*")[^"]*(")/\1'"$mode"'\2/' "$settings_file"
+}
+
+set_theme() {
+    local mode="$1"
+    local theme=$(theme_for "$mode")
+    local background=$(background_for "$mode")
+
+    local current=$(cat "$STATE_DIR/theme.name" 2>/dev/null)
+    local target=$(theme_slug "$theme")
+
+    echo "Current theme: $current, Target: $target"
+
+    if [[ "$current" != "$target" ]]; then
+        echo "Switching to $theme..."
+        # omarchy picks the background itself, one past whatever the previous
+        # theme was showing. Skipping that avoids a visible transition to its
+        # choice before the pinned one lands.
+        if OMARCHY_THEME_SKIP_BACKGROUND="${background:+1}" omarchy-theme-set "$theme" 2>&1; then
+            echo "Theme switched successfully"
+        else
+            echo "ERROR: omarchy-theme-set failed"
+            return 1
+        fi
+
+        if [[ -n "$background" ]] && ! apply_background "$target" "$background"; then
+            echo "Background '$background' is missing from $theme, falling back"
+            omarchy-theme-bg-next
+        fi
+    else
+        echo "Theme already set correctly"
+    fi
+
+    # Set VSCode theme
+    set_vscode_theme "$mode" "$HOME/.config/Code/User/settings.json"
+    set_vscode_theme "$mode" "$HOME/.config/Code - Insiders/User/settings.json"
+    set_vscode_theme "$mode" "$HOME/.config/VSCodium/User/settings.json"
+    
+    # Set Zed theme mode
+    set_zed_theme "$mode" "$HOME/.config/zed/settings.json"
+    
+    # Set system color scheme for GTK/XDG apps
+    if [[ "$mode" == "light" ]]; then
+        gsettings set org.gnome.desktop.interface color-scheme "prefer-light" 2>/dev/null
+        gsettings set org.gnome.desktop.interface gtk-theme "Adwaita" 2>/dev/null
+    else
+        gsettings set org.gnome.desktop.interface color-scheme "prefer-dark" 2>/dev/null
+        gsettings set org.gnome.desktop.interface gtk-theme "Adwaita-dark" 2>/dev/null
+    fi
+    
+    echo "$mode" > "$CONFIG_DIR/mode"
+}
+
+apply() {
+    local target_mode
+    if is_daytime; then
+        target_mode="light"
+    else
+        target_mode="dark"
+    fi
+    
+    echo "Applying $target_mode mode"
+    set_theme "$target_mode"
+}
+
+get_next_event() {
+    local sunrise=$(get_sun_time rise)
+    local sunset=$(get_sun_time set)
+    local now=$(date +%H:%M)
+    local today=$(date +%Y-%m-%d)
+    local tomorrow=$(date -d "+1 day" +%Y-%m-%d)
+    
+    if [[ "$now" < "$sunrise" ]]; then
+        echo "$today $sunrise"
+    elif [[ "$now" < "$sunset" ]]; then
+        echo "$today $sunset"
+    else
+        echo "$tomorrow $sunrise"
+    fi
+}
+
+schedule_next() {
+    systemctl --user stop "$NEXT_TIMER" 2>/dev/null
+    
+    local next=$(get_next_event)
+    local next_date=${next% *}
+    local next_time=${next#* }
+    local next_ts=$(date -d "$next_date $next_time" +%s)
+    
+    # Write scheduled time to file for verification
+    echo "$next_ts" > "$CONFIG_DIR/scheduled"
+    
+    # Schedule the transient timer
+    systemd-run --user --on-calendar="${next_date} ${next_time}:00" \
+        --unit=omarchy-auto-theme-next \
+        --description="Next theme switch at $next_time" \
+        "$SELF" trigger 2>/dev/null
+    
+    echo "Scheduled next theme switch for ${next_date} ${next_time}"
+}
+
+enable_auto_theme() {
+    # systemctl refuses to link a unit file that is itself a symlink, which is
+    # exactly what a stow-managed dotfiles checkout produces. Resolving first is
+    # a no-op when the plugin is installed normally.
+    if ! systemctl --user cat "$TIMER" >/dev/null 2>&1 && [[ -f "$TIMER_FILE" ]]; then
+        systemctl --user link "$(readlink -f "$SCRIPT_DIR/../systemd/omarchy-auto-theme.service")"
+        systemctl --user link "$(readlink -f "$TIMER_FILE")"
+        systemctl --user daemon-reload
+    fi
+
+    systemctl --user enable --now "$TIMER"
+    refresh_widget
+    (trigger >/dev/null 2>&1; refresh_widget) &
+}
+
+disable_auto_theme() {
+    local mode="$1"
+
+    systemctl --user stop "$TIMER"
+    rm -f "$TIMER_WANTS"
+    systemctl --user stop "$NEXT_TIMER" 2>/dev/null
+    rm -f "$CONFIG_DIR/scheduled"
+
+    if [[ -n "$mode" ]]; then
+        set_theme "$mode"
+    fi
+}
+
+check_missed() {
+    # Check if we missed a scheduled event (e.g., system was asleep)
+    local scheduled_file="$CONFIG_DIR/scheduled"
+    [[ -f "$scheduled_file" ]] || return 1
+    
+    local scheduled_ts=$(cat "$scheduled_file")
+    local now_ts=$(date +%s)
+    
+    # If scheduled time has passed, we missed it
+    [[ "$now_ts" -gt "$scheduled_ts" ]]
+}
+
+trigger() {
+    apply
+    schedule_next
+}
+
+json_escape() {
+    local text="$1"
+    text=${text//\\/\\\\}
+    text=${text//"/\\"}
+    text=${text//$'\n'/\\n}
+    printf '%s' "$text"
+}
+
+next_change() {
+    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
+    local scheduled="$CONFIG_DIR/scheduled"
+
+    if [[ "$active" != "active" ]]; then
+        echo "Auto disabled"
+        return
+    fi
+
+    if [[ -f "$scheduled" ]]; then
+        date -d "@$(cat "$scheduled")" '+%H:%M' 2>/dev/null && return
+    fi
+
+    echo "Not scheduled"
+}
+
+refresh_widget() {
+    omarchy-shell -q local.auto-theme refresh
+}
+
+disable_timer() {
+    systemctl --user stop "$TIMER"
+    rm -f "$TIMER_WANTS"
+    systemctl --user stop "$NEXT_TIMER" 2>/dev/null
+    rm -f "$CONFIG_DIR/scheduled"
+}
+
+cycle_mode() {
+    local mode=$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo unknown)
+    local target_mode
+
+    disable_timer
+
+    if [[ "$mode" == "light" ]]; then
+        target_mode="dark"
+    else
+        target_mode="light"
+    fi
+
+    echo "$target_mode" > "$CONFIG_DIR/mode"
+    refresh_widget
+    (set_theme "$target_mode" >/dev/null 2>&1; refresh_widget) &
+}
+
+toggle_auto() {
+    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
+    local target_mode
+
+    if [[ "$active" == "active" ]]; then
+        disable_timer
+        refresh_widget
+        return
+    fi
+
+    if is_daytime; then
+        target_mode="light"
+    else
+        target_mode="dark"
+    fi
+
+    if ! systemctl --user cat "$TIMER" >/dev/null 2>&1 && [[ -f "$TIMER_FILE" ]]; then
+        systemctl --user link "$TIMER_FILE"
+    fi
+
+    systemctl --user enable --now "$TIMER"
+    echo "$target_mode" > "$CONFIG_DIR/mode"
+    refresh_widget
+    (trigger >/dev/null 2>&1; refresh_widget) &
+}
+
+set_mode_manual() {
+    local mode="$1"
+
+    case "$mode" in
+        light|dark) ;;
+        *) echo "Usage: omarchy-auto-theme mode <light|dark>"; return 1 ;;
+    esac
+
+    disable_timer
+    echo "$mode" > "$CONFIG_DIR/mode"
+    refresh_widget
+    (set_theme "$mode" >/dev/null 2>&1; refresh_widget) &
+}
+
+write_config() {
+    local key="$1" value="$2"
+
+    if grep -q "^$key=" "$CONFIG_FILE"; then
+        sed -i --follow-symlinks "s|^$key=.*|$key=\"$value\"|" "$CONFIG_FILE"
+    else
+        printf '%s="%s"\n' "$key" "$value" >>"$CONFIG_FILE"
+    fi
+}
+
+set_config() {
+    local slot="$1" value="$2"
+
+    case "$slot" in
+        light|dark)
+            [[ -n "$value" ]] || { echo "Missing theme name"; return 1; }
+
+            # A pinned background names a file inside the theme being replaced.
+            [[ "$(theme_for "$slot")" == "$value" ]] || write_config "$(background_var "$slot")" ""
+            write_config "$(theme_var "$slot")" "$value"
+
+            source "$CONFIG_FILE"
+            refresh_widget
+            (set_theme "$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo dark)" >/dev/null 2>&1; refresh_widget) &
+            ;;
+        light-bg|dark-bg)
+            local mode="${slot%-bg}"
+
+            write_config "$(background_var "$mode")" "$value"
+
+            source "$CONFIG_FILE"
+            refresh_widget
+            (preview_background "$mode" >/dev/null 2>&1; refresh_widget) &
+            ;;
+        *)
+            echo "Usage: omarchy-auto-theme config <light|dark|light-bg|dark-bg> <value>"
+            return 1
+            ;;
+    esac
+}
+
+next_event_kind() {
+    local sunrise="$1" sunset="$2"
+    local now=$(date +%H:%M)
+
+    # Mirrors get_next_event: before dawn and after dusk the next event is a
+    # sunrise, otherwise it is today's sunset.
+    if [[ "$now" < "$sunrise" ]]; then
+        echo "sunrise"
+    elif [[ "$now" < "$sunset" ]]; then
+        echo "sunset"
+    else
+        echo "sunrise"
+    fi
+}
+
+json_array() {
+    local first=1 item
+
+    printf '['
+    for item in "$@"; do
+        (( first )) || printf ','
+        first=0
+        printf '"%s"' "$(json_escape "$item")"
+    done
+    printf ']'
+}
+
+panel_json() {
+    local mode=$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo unknown)
+    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
+    local auto="false"
+    local sunrise=$(get_sun_time rise)
+    local sunset=$(get_sun_time set)
+    local light=() dark=()
+
+    [[ "$active" == "active" ]] && auto="true"
+
+    mapfile -t light < <(background_list "$(theme_slug "$LIGHT_THEME")")
+    mapfile -t dark < <(background_list "$(theme_slug "$DARK_THEME")")
+
+    printf '{"mode":"%s","auto":%s,"lightTheme":"%s","darkTheme":"%s","lightBackground":"%s","darkBackground":"%s","lightBackgrounds":%s,"darkBackgrounds":%s,"nextChange":"%s","nextEvent":"%s","sunrise":"%s","sunset":"%s"}\n' \
+        "$mode" "$auto" \
+        "$(json_escape "$LIGHT_THEME")" "$(json_escape "$DARK_THEME")" \
+        "$(json_escape "$LIGHT_BACKGROUND")" "$(json_escape "$DARK_BACKGROUND")" \
+        "$(json_array "${light[@]}")" "$(json_array "${dark[@]}")" \
+        "$(json_escape "$(next_change)")" \
+        "$(next_event_kind "$sunrise" "$sunset")" \
+        "$(json_escape "$sunrise")" "$(json_escape "$sunset")"
+}
+
+status_json() {
+    local mode=$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo unknown)
+    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
+    local icon class state theme tooltip
+
+    case "$mode" in
+        light)
+            icon="󰖨"
+            class="light"
+            theme="$LIGHT_THEME"
+            ;;
+        dark)
+            icon="󰖔"
+            class="dark"
+            theme="$DARK_THEME"
+            ;;
+        *)
+            icon="󰔎"
+            class="unknown"
+            theme="Unknown"
+            ;;
+    esac
+
+    if [[ "$active" == "active" ]]; then
+        state="Auto"
+        class="$class auto"
+    else
+        state="Manual"
+        class="$class manual"
+    fi
+
+    tooltip="State: $state
+Mode: $mode
+Theme: ${theme:-Unknown}
+Next change: $(next_change)"
+
+    printf '{"text":"%s","tooltip":"%s","class":"%s"}\n' "$icon" "$(json_escape "$tooltip")" "$class"
+}
+
+case "${1:-apply}" in
+    apply)
+        apply
+        ;;
+    light)
+        set_theme light
+        ;;
+    dark)
+        set_theme dark
+        ;;
+    toggle)
+        current=$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo "dark")
+        if [[ "$current" == "light" ]]; then
+            set_theme dark
+        else
+            set_theme light
+        fi
+        ;;
+    cycle)
+        cycle_mode
+        ;;
+    auto)
+        toggle_auto
+        ;;
+    status-json | waybar)
+        status_json
+        ;;
+    panel-json)
+        panel_json
+        ;;
+    mode)
+        set_mode_manual "$2"
+        ;;
+    config)
+        set_config "$2" "$3"
+        ;;
+    backgrounds)
+        case "$2" in
+            light|dark) background_list "$(theme_slug "$(theme_for "$2")")" ;;
+            *) echo "Usage: omarchy-auto-theme backgrounds <light|dark>"; exit 1 ;;
+        esac
+        ;;
+    trigger)
+        trigger
+        ;;
+    schedule)
+        schedule_next
+        ;;
+    enable)
+        enable_auto_theme
+        ;;
+    disable)
+        case "$2" in
+            ""|light|dark)
+                disable_auto_theme "$2"
+                ;;
+            *)
+                echo "Usage: omarchy-auto-theme disable [light|dark]"
+                exit 1
+                ;;
+        esac
+        ;;
+    status)
+        loc=$(get_location)
+        coords=$(format_coords)
+        echo "Location: $loc ($coords)"
+        echo "Auto theme: $(systemctl --user is-enabled "$TIMER" 2>/dev/null) / $(systemctl --user is-active "$TIMER" 2>/dev/null)"
+        echo "Daytime: $(is_daytime && echo "yes" || echo "no")"
+        echo "Current mode: $(cat "$CONFIG_DIR/mode" 2>/dev/null || echo "unknown")"
+        echo "Light theme: $LIGHT_THEME ${LIGHT_BACKGROUND:+(background: $LIGHT_BACKGROUND)}"
+        echo "Dark theme: $DARK_THEME ${DARK_BACKGROUND:+(background: $DARK_BACKGROUND)}"
+        echo "Next sunrise: $(get_sun_time rise)"
+        echo "Next sunset: $(get_sun_time set)"
+        # Show scheduled timer if exists
+        systemctl --user list-timers omarchy-auto-theme-next* 2>/dev/null | grep -v "^$" | tail -n +2 | head -1
+        ;;
+    sunrise)
+        get_sun_time rise
+        ;;
+    sunset)
+        get_sun_time set
+        ;;
+    *)
+        echo "Usage: omarchy-auto-theme [apply|light|dark|toggle|cycle|auto|mode|config|backgrounds|status-json|panel-json|trigger|schedule|enable|disable|status|sunrise|sunset]"
+        exit 1
+        ;;
+esac

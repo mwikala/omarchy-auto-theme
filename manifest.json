@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "local.auto-theme",
+  "name": "Auto Theme",
+  "version": "1.0.0",
+  "author": "Mwikala Kangwa",
+  "description": "Sunrise/sunset light-dark theme switching with manual override.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Auto Theme",
+    "description": "Light/dark mode indicator. Left click cycles mode, right click toggles automatic switching.",
+    "category": "Appearance",
+    "allowMultiple": false,
+    "defaults": {
+      "refreshIntervalSec": 60
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 10,
+        "max": 3600,
+        "step": 10,
+        "defaultValue": 60
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Auto theme switching at sunrise/sunset
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
