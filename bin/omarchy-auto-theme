@@ -16,6 +16,11 @@ SCRIPT_DIR=$(dirname "$SELF")
 # Units ship inside the plugin; systemctl --user link pulls them in from here.
 TIMER_FILE="$SCRIPT_DIR/../systemd/$TIMER"
 TIMER_WANTS="$HOME/.config/systemd/user/timers.target.wants/$TIMER"
+ZED_TEMPLATE="$SCRIPT_DIR/../templates/zed.json.tpl"
+ZED_THEME_FILE="$HOME/.config/zed/themes/omarchy.json"
+ZED_SETTINGS="$HOME/.config/zed/settings.json"
+ZED_READABLE=(accent red yellow orange green cyan blue magenta purple brown
+              bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta bright_purple)
 
 source "$CONFIG_FILE"
 
@@ -151,28 +156,141 @@ preview_background() {
     apply_background "$slug" "$(background_for "$1")"
 }
 
-set_vscode_theme() {
-    local mode="$1"
-    local settings_file="$2"
-    
-    [[ -f "$settings_file" ]] || return
-    
-    local pref_key="preferredDarkColorTheme"
-    [[ "$mode" == "light" ]] && pref_key="preferredLightColorTheme"
-    
-    local theme=$(grep -o "\"workbench\.$pref_key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$settings_file" | sed 's/.*: *"\([^"]*\)".*/\1/')
-    [[ -z "$theme" ]] && return
-    
-    sed -i --follow-symlinks -E "s/(\"workbench\.colorTheme\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\1$theme\2/" "$settings_file"
+theme_colors() {
+    local slug=$(theme_slug "$(theme_for "$1")") dir
+
+    if [[ "$(cat "$STATE_DIR/theme.name" 2>/dev/null)" == "$slug" ]]; then
+        echo "$STATE_DIR/theme/colors.toml"
+        return
+    fi
+
+    for dir in "$HOME/.config/omarchy/themes/$slug" "$OMARCHY_PATH/themes/$slug"; do
+        [[ -f "$dir/colors.toml" ]] && { echo "$dir/colors.toml"; return; }
+    done
+}
+
+zed_theme_name() { echo "Omarchy ${1^}"; }
+
+# A palette's hues are chosen for a terminal, where one of them colours a prompt
+# and not every tag in a file. Flexoki Light's yellow lands at 2.3:1 on its own
+# background, which reads fine in a shell and is painful in an editor, so
+# anything short of 4.5:1 is blended toward the foreground until it clears.
+# Backgrounds, muted greys and the ANSI colorN keys are left alone: the first
+# two are meant to recede, and the last have to match the real terminal.
+readable() {
+    awk -v color="$1" -v bg="$2" -v fg="$3" -v target="${4:-4.5}" '
+        function hexv(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+        function byte(h, i) { return hexv(substr(h, i, 1)) * 16 + hexv(substr(h, i + 1, 1)) }
+        function lin(v) { v = v / 255; return (v <= 0.03928) ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
+
+        function luminance(h) {
+            sub(/^#/, "", h)
+            return 0.2126 * lin(byte(h, 1)) + 0.7152 * lin(byte(h, 3)) + 0.0722 * lin(byte(h, 5))
+        }
+
+        function ratio(a, b,   la, lb, swap) {
+            la = luminance(a); lb = luminance(b)
+            if (la < lb) { swap = la; la = lb; lb = swap }
+            return (la + 0.05) / (lb + 0.05)
+        }
+
+        function blend(a, b, amount) {
+            sub(/^#/, "", a); sub(/^#/, "", b)
+            return sprintf("#%02x%02x%02x",
+                int(byte(a, 1) * (1 - amount) + byte(b, 1) * amount + 0.5),
+                int(byte(a, 3) * (1 - amount) + byte(b, 3) * amount + 0.5),
+                int(byte(a, 5) * (1 - amount) + byte(b, 5) * amount + 0.5))
+        }
+
+        BEGIN {
+            if (color !~ /^#[0-9A-Fa-f]{6}$/ || bg !~ /^#[0-9A-Fa-f]{6}$/ || fg !~ /^#[0-9A-Fa-f]{6}$/) {
+                print color; exit
+            }
+
+            if (ratio(color, bg) >= target) { print color; exit }
+
+            for (amount = 0.05; amount < 1; amount += 0.05) {
+                candidate = blend(color, fg, amount)
+                if (ratio(candidate, bg) >= target) { print candidate; exit }
+            }
+
+            print fg
+        }
+    '
+}
+
+# Zed reads user themes from a file, so both slots are generated from the two
+# omarchy palettes and the mode switch below picks between them. Nothing has to
+# be installed in the editor, and a new omarchy theme needs no counterpart.
+render_zed_variant() {
+    local colors="$1" name="$2"
+    local script=$(mktemp)
+    local -A palette=()
+    local key value
+
+    while IFS=$'\t' read -r key value; do
+        palette[$key]="$value"
+    done < <(omarchy-theme-color --file "$colors" --all)
+
+    # The two recessive text tones. Punctuation sits inline with code and gets
+    # the higher floor; comments sit under it. Both lift toward the foreground
+    # rather than toward each other — Everforest's dim text is itself only
+    # 1.7:1, so a blend toward it never converges, and White and Vantablack put
+    # the two greys in the opposite order to everyone else.
+    palette[dark_foreground]=$(readable "${palette[dark_foreground]}" "${palette[background]}" "${palette[foreground]}" 3.5)
+    palette[dim]=$(readable "${palette[muted]}" "${palette[background]}" "${palette[foreground]}" 3)
+
+    for key in "${!palette[@]}"; do
+        value="${palette[$key]}"
+        [[ " ${ZED_READABLE[*]} " == *" $key "* ]] &&
+            value=$(readable "$value" "${palette[background]}" "${palette[foreground]}")
+        printf 's|{{ %s }}|%s|g\n' "$key" "$value" >>"$script"
+    done
+    printf 's|{{ name }}|%s|g\n' "$name" >>"$script"
+
+    sed -f "$script" "$ZED_TEMPLATE"
+    rm -f "$script"
+}
+
+generate_zed_theme() {
+    local mode variant name colors
+    local themes="[]"
+
+    [[ -f "$ZED_TEMPLATE" ]] || return
+
+    for mode in light dark; do
+        colors=$(theme_colors "$mode")
+        [[ -f "$colors" ]] || continue
+
+        name=$(zed_theme_name "$mode")
+        variant=$(render_zed_variant "$colors" "$name") || continue
+        themes=$(jq --argjson variant "$variant" '. + [$variant]' <<<"$themes") || return
+    done
+
+    [[ "$themes" == "[]" ]] && return
+
+    mkdir -p "$(dirname "$ZED_THEME_FILE")"
+    jq -n --argjson themes "$themes" \
+        '{"$schema":"https://zed.dev/schema/themes/v0.2.0.json",name:"Omarchy",author:"omarchy-auto-theme",themes:$themes}' \
+        >"$ZED_THEME_FILE"
+}
+
+# Zed's settings are JSONC, so edit the theme block in place rather than
+# reserialising a file jq would reject.
+zed_setting() {
+    sed -i --follow-symlinks -E '/"theme"[[:space:]]*:[[:space:]]*\{/,/[[:space:]]*\}[[:space:]]*,?[[:space:]]*$/ s/("'"$1"'"[[:space:]]*:[[:space:]]*")[^"]*(")/\1'"$2"'\2/' "$ZED_SETTINGS"
 }
 
 set_zed_theme() {
     local mode="$1"
-    local settings_file="$2"
 
-    [[ -f "$settings_file" ]] || return
+    generate_zed_theme
 
-    sed -i --follow-symlinks -E '/"theme"[[:space:]]*:[[:space:]]*\{/,/[[:space:]]*\}[[:space:]]*,?[[:space:]]*$/ s/("mode"[[:space:]]*:[[:space:]]*")[^"]*(")/\1'"$mode"'\2/' "$settings_file"
+    [[ -f "$ZED_SETTINGS" ]] || return
+
+    zed_setting light "$(zed_theme_name light)"
+    zed_setting dark "$(zed_theme_name dark)"
+    zed_setting mode "$mode"
 }
 
 set_theme() {
@@ -205,14 +323,8 @@ set_theme() {
         echo "Theme already set correctly"
     fi
 
-    # Set VSCode theme
-    set_vscode_theme "$mode" "$HOME/.config/Code/User/settings.json"
-    set_vscode_theme "$mode" "$HOME/.config/Code - Insiders/User/settings.json"
-    set_vscode_theme "$mode" "$HOME/.config/VSCodium/User/settings.json"
-    
-    # Set Zed theme mode
-    set_zed_theme "$mode" "$HOME/.config/zed/settings.json"
-    
+    set_zed_theme "$mode"
+
     # Set system color scheme for GTK/XDG apps
     if [[ "$mode" == "light" ]]; then
         gsettings set org.gnome.desktop.interface color-scheme "prefer-light" 2>/dev/null
