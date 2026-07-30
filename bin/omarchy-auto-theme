@@ -10,11 +10,13 @@ STATE_DIR="$HOME/.local/state/omarchy/current"
 OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
 IMAGE_TYPES=(-iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.bmp' -o -iname '*.webp')
 TIMER="omarchy-auto-theme.timer"
+SERVICE="omarchy-auto-theme.service"
 NEXT_TIMER="omarchy-auto-theme-next.timer"
 SELF=$(readlink -f "$0")
 SCRIPT_DIR=$(dirname "$SELF")
 # Units ship inside the plugin; systemctl --user link pulls them in from here.
 TIMER_FILE="$SCRIPT_DIR/../systemd/$TIMER"
+SERVICE_FILE="$SCRIPT_DIR/../systemd/$SERVICE"
 TIMER_WANTS="$HOME/.config/systemd/user/timers.target.wants/$TIMER"
 ZED_TEMPLATE="$SCRIPT_DIR/../templates/zed.json.tpl"
 ZED_THEME_FILE="$HOME/.config/zed/themes/omarchy.json"
@@ -385,15 +387,20 @@ schedule_next() {
     echo "Scheduled next theme switch for ${next_date} ${next_time}"
 }
 
+# The timer activates the service by name, so linking one without the other
+# leaves it enabled but unable to start. Resolving first covers a checkout whose
+# unit files are themselves symlinks, which systemctl --user link refuses.
+link_units() {
+    systemctl --user cat "$TIMER" >/dev/null 2>&1 && return 0
+    [[ -f $TIMER_FILE && -f $SERVICE_FILE ]] || return 0
+
+    systemctl --user link "$(readlink -f "$SERVICE_FILE")"
+    systemctl --user link "$(readlink -f "$TIMER_FILE")"
+    systemctl --user daemon-reload
+}
+
 enable_auto_theme() {
-    # systemctl refuses to link a unit file that is itself a symlink, which is
-    # exactly what a stow-managed dotfiles checkout produces. Resolving first is
-    # a no-op when the plugin is installed normally.
-    if ! systemctl --user cat "$TIMER" >/dev/null 2>&1 && [[ -f "$TIMER_FILE" ]]; then
-        systemctl --user link "$(readlink -f "$SCRIPT_DIR/../systemd/omarchy-auto-theme.service")"
-        systemctl --user link "$(readlink -f "$TIMER_FILE")"
-        systemctl --user daemon-reload
-    fi
+    link_units
 
     systemctl --user enable --now "$TIMER"
     refresh_widget
@@ -498,9 +505,7 @@ toggle_auto() {
         target_mode="dark"
     fi
 
-    if ! systemctl --user cat "$TIMER" >/dev/null 2>&1 && [[ -f "$TIMER_FILE" ]]; then
-        systemctl --user link "$TIMER_FILE"
-    fi
+    link_units
 
     systemctl --user enable --now "$TIMER"
     echo "$target_mode" > "$CONFIG_DIR/mode"
