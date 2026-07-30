@@ -8,6 +8,9 @@ uses.
 Applying a mode also retints Zed and the GTK/XDG colour scheme so the whole
 desktop moves together.
 
+![The Auto Theme panel: Light, Dark and Auto buttons above the theme and background
+pickers for each mode](screenshot.png)
+
 ## Layout
 
 ```
@@ -35,8 +38,8 @@ yay -S sunwait
 omarchy plugin add https://github.com/mwikala/omarchy-auto-theme.git --enable
 ```
 
-Then add the widget to the bar and pick Auto from its dropdown, which links and starts
-the timer. Update later with `omarchy plugin update mwikala.auto-theme`.
+Then add the widget to the bar and click Auto in its panel, which links and starts the
+timer. Update later with `omarchy plugin update mwikala.auto-theme`.
 
 ## Requirements
 
