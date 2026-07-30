@@ -27,15 +27,20 @@ unit uses `%h/.config/omarchy/plugins/mwikala.auto-theme/`.
 
 ## Install
 
+`sunwait` is not in the Arch repositories and there is no fallback for it — without
+it every hour reads as night and the theme never leaves dark. Install it first:
+
 ```bash
+yay -S sunwait
 omarchy plugin add https://github.com/mwikala/omarchy-auto-theme.git --enable
 ```
 
-Update later with `omarchy plugin update mwikala.auto-theme`.
+Then add the widget to the bar and pick Auto from its dropdown, which links and starts
+the timer. Update later with `omarchy plugin update mwikala.auto-theme`.
 
 ## Requirements
 
-- `sunwait` for sunrise/sunset times
+- `sunwait` for sunrise/sunset times (AUR)
 - `omarchy-theme-set` and `omarchy-theme-color` (ship with Omarchy)
 - `jq`
 
