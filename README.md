@@ -117,6 +117,13 @@ from `colors.toml`. Setting them here only fought with it.
 
 ## CLI
 
+The panel covers everything below, so the engine stays in the plugin rather than on
+`PATH`. Put it there yourself if you want it:
+
+```bash
+ln -s ~/.config/omarchy/plugins/mwikala.auto-theme/bin/omarchy-auto-theme ~/.local/bin/
+```
+
 ```bash
 omarchy-auto-theme status         # location, mode, sun times, timer state
 omarchy-auto-theme mode light     # manual override, disables auto
