@@ -455,7 +455,7 @@ next_change() {
 }
 
 refresh_widget() {
-    omarchy-shell -q local.auto-theme refresh
+    omarchy-shell -q mwikala.auto-theme refresh
 }
 
 disable_timer() {

@@ -11,7 +11,7 @@ desktop moves together.
 ## Layout
 
 ```
-local.auto-theme/
+mwikala.auto-theme/
 ├── manifest.json                    plugin declaration
 ├── Widget.qml                       bar widget + popup panel
 ├── bin/omarchy-auto-theme           engine: sun times, scheduling, theming
@@ -23,7 +23,15 @@ local.auto-theme/
 
 Everything resolves relative to this directory. The QML finds the script via
 `Qt.resolvedUrl`, the script finds its units via `$SCRIPT_DIR`, and the service
-unit uses `%h/.config/omarchy/plugins/local.auto-theme/`.
+unit uses `%h/.config/omarchy/plugins/mwikala.auto-theme/`.
+
+## Install
+
+```bash
+omarchy plugin add https://github.com/mwikala/omarchy-auto-theme.git --enable
+```
+
+Update later with `omarchy plugin update mwikala.auto-theme`.
 
 ## Requirements
 
@@ -125,7 +133,7 @@ omarchy-auto-theme panel-json     # state consumed by the panel
 The script pushes state after applying a change:
 
 ```bash
-omarchy-shell -q local.auto-theme refresh
+omarchy-shell -q mwikala.auto-theme refresh
 ```
 
 `Widget.qml` replaces `Panel`'s built-in IPC handler (`manageIpc: false`) to
@@ -133,13 +141,6 @@ expose `refresh` alongside `open`/`close`/`toggle` — the base only provides th
 latter, so without this the push is silently dropped and the panel falls back to
 its 60s poll. Clicks also paint optimistically, so the control never lags.
 
-## Extracting to its own repository
+## License
 
-This directory is the whole product; copy it to a new repo root and it installs
-with `omarchy plugin add <git-url>`. Before publishing:
-
-- rename the id off the `local.` prefix (`manifest.json` `id`, plus `moduleName`
-  and `ipcTarget` in `Widget.qml`, the `refresh_widget` target in the script,
-  and the path in the service unit)
-- add a LICENSE
-- declare the `sunwait` dependency
+MIT

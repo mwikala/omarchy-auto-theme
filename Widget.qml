@@ -6,8 +6,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "local.auto-theme"
-  ipcTarget: "local.auto-theme"
+  moduleName: "mwikala.auto-theme"
+  ipcTarget: "mwikala.auto-theme"
 
   // Panel's built-in handler only exposes open/close/toggle, so it is replaced
   // here to add refresh -- that is how the script pushes state after applying a
