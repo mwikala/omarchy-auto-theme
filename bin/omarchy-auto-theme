@@ -7,7 +7,7 @@ CONFIG_DIR="$HOME/.config/omarchy/auto-theme"
 CONFIG_FILE="$CONFIG_DIR/config"
 CACHE_FILE="$CONFIG_DIR/location.cache"
 STATE_DIR="$HOME/.local/state/omarchy/current"
-OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+export OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
 IMAGE_TYPES=(-iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.bmp' -o -iname '*.webp')
 TIMER="omarchy-auto-theme.timer"
 SERVICE="omarchy-auto-theme.service"
@@ -433,7 +433,7 @@ check_missed() {
 }
 
 trigger() {
-    apply
+    apply || return
     schedule_next
 }
 

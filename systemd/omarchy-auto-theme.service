@@ -5,10 +5,6 @@ After=graphical-session.target
 [Service]
 Type=oneshot
 ExecStart=%h/.config/omarchy/plugins/mwikala.auto-theme/bin/omarchy-auto-theme trigger
-Environment=DISPLAY=:1
-Environment=WAYLAND_DISPLAY=wayland-1
-Environment=XDG_CURRENT_DESKTOP=Hyprland
-Environment=XDG_SESSION_TYPE=wayland
 
 [Install]
 WantedBy=default.target
