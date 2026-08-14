@@ -5,6 +5,3 @@ After=graphical-session.target
 [Service]
 Type=oneshot
 ExecStart=%h/.config/omarchy/plugins/mwikala.auto-theme/bin/omarchy-auto-theme trigger
-
-[Install]
-WantedBy=default.target

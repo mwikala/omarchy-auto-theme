@@ -18,6 +18,7 @@ SCRIPT_DIR=$(dirname "$SELF")
 TIMER_FILE="$SCRIPT_DIR/../systemd/$TIMER"
 SERVICE_FILE="$SCRIPT_DIR/../systemd/$SERVICE"
 TIMER_WANTS="$HOME/.config/systemd/user/timers.target.wants/$TIMER"
+SERVICE_WANTS="$HOME/.config/systemd/user/default.target.wants/$SERVICE"
 ZED_TEMPLATE="$SCRIPT_DIR/../templates/zed.json.tpl"
 ZED_THEME_FILE="$HOME/.config/zed/themes/omarchy.json"
 ZED_SETTINGS="$HOME/.config/zed/settings.json"
@@ -410,10 +411,7 @@ enable_auto_theme() {
 disable_auto_theme() {
     local mode="$1"
 
-    systemctl --user stop "$TIMER"
-    rm -f "$TIMER_WANTS"
-    systemctl --user stop "$NEXT_TIMER" 2>/dev/null
-    rm -f "$CONFIG_DIR/scheduled"
+    disable_timer
 
     if [[ -n "$mode" ]]; then
         set_theme "$mode"
@@ -466,9 +464,9 @@ refresh_widget() {
 }
 
 disable_timer() {
-    systemctl --user stop "$TIMER"
-    rm -f "$TIMER_WANTS"
+    systemctl --user stop "$TIMER" 2>/dev/null
     systemctl --user stop "$NEXT_TIMER" 2>/dev/null
+    rm -f "$TIMER_WANTS" "$SERVICE_WANTS"
     rm -f "$CONFIG_DIR/scheduled"
 }
 
