@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "mwikala.auto-theme",
   "name": "Auto Theme",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Mwikala Kangwa",
-  "description": "Sunrise/sunset light-dark theme switching with manual override.",
+  "description": "Sunrise/sunset light-dark theme and night light switching with manual override.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "Widget.qml"

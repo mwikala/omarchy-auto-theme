@@ -26,6 +26,7 @@ ZED_READABLE=(accent red yellow orange green cyan blue magenta purple brown
               bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta bright_purple)
 
 source "$CONFIG_FILE"
+NIGHTLIGHT="${NIGHTLIGHT:-off}"
 
 get_location() {
     if [[ -n "$LOCATION" ]]; then
@@ -340,6 +341,33 @@ set_theme() {
     echo "$mode" > "$CONFIG_DIR/mode"
 }
 
+# Same temperatures as omarchy-toggle-nightlight / the nightlight service.
+set_nightlight() {
+    local method=disable temp=6500
+
+    [[ "$1" == on ]] && { method=enable; temp=4000; }
+
+    if omarchy-shell nightlight "$method" >/dev/null 2>&1; then
+        return
+    fi
+
+    if ! pgrep -x hyprsunset >/dev/null; then
+        setsid uwsm-app -- hyprsunset &
+        sleep 0.2
+    fi
+
+    hyprctl hyprsunset temperature "$temp" >/dev/null 2>&1
+    omarchy-shell -q nightlight refresh
+}
+
+apply_nightlight_for_sun() {
+    if is_daytime; then
+        set_nightlight off
+    else
+        set_nightlight on
+    fi
+}
+
 apply() {
     local target_mode
     if is_daytime; then
@@ -388,6 +416,36 @@ schedule_next() {
     echo "Scheduled next theme switch for ${next_date} ${next_time}"
 }
 
+# Missing file is the pre-nightlight signal: the timer meant theme-auto.
+# 1/0 records an explicit choice so nightlight can keep the timer running
+# without the theme looking like it is still following the sun.
+theme_follows_sun() {
+    if [[ -f "$CONFIG_DIR/auto" ]]; then
+        [[ "$(<"$CONFIG_DIR/auto")" == 1 ]]
+        return
+    fi
+
+    local active
+    active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
+    [[ "$active" == "active" ]]
+}
+
+nightlight_follows_sun() { [[ "$NIGHTLIGHT" == auto ]]; }
+
+set_theme_auto() { echo 1 > "$CONFIG_DIR/auto"; }
+clear_theme_auto() { echo 0 > "$CONFIG_DIR/auto"; }
+
+# Night light can own the timer too, so record the current theme-auto
+# meaning of that timer before we start or stop it for another reason.
+ensure_theme_auto_flag() {
+    [[ -f "$CONFIG_DIR/auto" ]] && return
+    if theme_follows_sun; then
+        set_theme_auto
+    else
+        clear_theme_auto
+    fi
+}
+
 # The timer activates the service by name, so linking one without the other
 # leaves it enabled but unable to start. Resolving first covers a checkout whose
 # unit files are themselves symlinks, which systemctl --user link refuses.
@@ -400,10 +458,20 @@ link_units() {
     systemctl --user daemon-reload
 }
 
-enable_auto_theme() {
-    link_units
+sync_timer() {
+    ensure_theme_auto_flag
+    if theme_follows_sun || nightlight_follows_sun; then
+        link_units
+        systemctl --user enable --now "$TIMER"
+        return
+    fi
 
-    systemctl --user enable --now "$TIMER"
+    disable_timer
+}
+
+enable_auto_theme() {
+    set_theme_auto
+    sync_timer
     refresh_widget
     (trigger >/dev/null 2>&1; refresh_widget) &
 }
@@ -411,7 +479,8 @@ enable_auto_theme() {
 disable_auto_theme() {
     local mode="$1"
 
-    disable_timer
+    clear_theme_auto
+    sync_timer
 
     if [[ -n "$mode" ]]; then
         set_theme "$mode"
@@ -431,8 +500,17 @@ check_missed() {
 }
 
 trigger() {
-    apply || return
-    schedule_next
+    if theme_follows_sun; then
+        apply
+    fi
+
+    if nightlight_follows_sun; then
+        apply_nightlight_for_sun
+    fi
+
+    if theme_follows_sun || nightlight_follows_sun; then
+        schedule_next
+    fi
 }
 
 json_escape() {
@@ -444,10 +522,9 @@ json_escape() {
 }
 
 next_change() {
-    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
     local scheduled="$CONFIG_DIR/scheduled"
 
-    if [[ "$active" != "active" ]]; then
+    if ! theme_follows_sun && ! nightlight_follows_sun; then
         echo "Auto disabled"
         return
     fi
@@ -474,7 +551,8 @@ cycle_mode() {
     local mode=$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo unknown)
     local target_mode
 
-    disable_timer
+    clear_theme_auto
+    sync_timer
 
     if [[ "$mode" == "light" ]]; then
         target_mode="dark"
@@ -488,27 +566,14 @@ cycle_mode() {
 }
 
 toggle_auto() {
-    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
-    local target_mode
-
-    if [[ "$active" == "active" ]]; then
-        disable_timer
+    if theme_follows_sun; then
+        clear_theme_auto
+        sync_timer
         refresh_widget
         return
     fi
 
-    if is_daytime; then
-        target_mode="light"
-    else
-        target_mode="dark"
-    fi
-
-    link_units
-
-    systemctl --user enable --now "$TIMER"
-    echo "$target_mode" > "$CONFIG_DIR/mode"
-    refresh_widget
-    (trigger >/dev/null 2>&1; refresh_widget) &
+    enable_auto_theme
 }
 
 set_mode_manual() {
@@ -519,10 +584,34 @@ set_mode_manual() {
         *) echo "Usage: omarchy-auto-theme mode <light|dark>"; return 1 ;;
     esac
 
-    disable_timer
+    clear_theme_auto
+    sync_timer
     echo "$mode" > "$CONFIG_DIR/mode"
     refresh_widget
     (set_theme "$mode" >/dev/null 2>&1; refresh_widget) &
+}
+
+set_nightlight_mode() {
+    local value="$1"
+
+    case "$value" in
+        on|off|auto) ;;
+        *) echo "Usage: omarchy-auto-theme nightlight <on|off|auto>"; return 1 ;;
+    esac
+
+    write_config NIGHTLIGHT "$value"
+    NIGHTLIGHT="$value"
+
+    if [[ "$value" == auto ]]; then
+        sync_timer
+        apply_nightlight_for_sun
+        [[ -f "$CONFIG_DIR/scheduled" ]] || schedule_next
+    else
+        set_nightlight "$value"
+        sync_timer
+    fi
+
+    refresh_widget
 }
 
 write_config() {
@@ -547,6 +636,7 @@ set_config() {
             write_config "$(theme_var "$slot")" "$value"
 
             source "$CONFIG_FILE"
+            NIGHTLIGHT="${NIGHTLIGHT:-off}"
             refresh_widget
             (set_theme "$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo dark)" >/dev/null 2>&1; refresh_widget) &
             ;;
@@ -556,6 +646,7 @@ set_config() {
             write_config "$(background_var "$mode")" "$value"
 
             source "$CONFIG_FILE"
+            NIGHTLIGHT="${NIGHTLIGHT:-off}"
             refresh_widget
             (preview_background "$mode" >/dev/null 2>&1; refresh_widget) &
             ;;
@@ -595,19 +686,18 @@ json_array() {
 
 panel_json() {
     local mode=$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo unknown)
-    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
     local auto="false"
     local sunrise=$(get_sun_time rise)
     local sunset=$(get_sun_time set)
     local light=() dark=()
 
-    [[ "$active" == "active" ]] && auto="true"
+    theme_follows_sun && auto="true"
 
     mapfile -t light < <(background_list "$(theme_slug "$LIGHT_THEME")")
     mapfile -t dark < <(background_list "$(theme_slug "$DARK_THEME")")
 
-    printf '{"mode":"%s","auto":%s,"lightTheme":"%s","darkTheme":"%s","lightBackground":"%s","darkBackground":"%s","lightBackgrounds":%s,"darkBackgrounds":%s,"nextChange":"%s","nextEvent":"%s","sunrise":"%s","sunset":"%s"}\n' \
-        "$mode" "$auto" \
+    printf '{"mode":"%s","auto":%s,"nightlight":"%s","lightTheme":"%s","darkTheme":"%s","lightBackground":"%s","darkBackground":"%s","lightBackgrounds":%s,"darkBackgrounds":%s,"nextChange":"%s","nextEvent":"%s","sunrise":"%s","sunset":"%s"}\n' \
+        "$mode" "$auto" "$NIGHTLIGHT" \
         "$(json_escape "$LIGHT_THEME")" "$(json_escape "$DARK_THEME")" \
         "$(json_escape "$LIGHT_BACKGROUND")" "$(json_escape "$DARK_BACKGROUND")" \
         "$(json_array "${light[@]}")" "$(json_array "${dark[@]}")" \
@@ -618,7 +708,6 @@ panel_json() {
 
 status_json() {
     local mode=$(cat "$CONFIG_DIR/mode" 2>/dev/null || echo unknown)
-    local active=$(systemctl --user is-active "$TIMER" 2>/dev/null || true)
     local icon class state theme tooltip
 
     case "$mode" in
@@ -639,7 +728,7 @@ status_json() {
             ;;
     esac
 
-    if [[ "$active" == "active" ]]; then
+    if theme_follows_sun; then
         state="Auto"
         class="$class auto"
     else
@@ -650,6 +739,7 @@ status_json() {
     tooltip="State: $state
 Mode: $mode
 Theme: ${theme:-Unknown}
+Night light: $NIGHTLIGHT
 Next change: $(next_change)"
 
     printf '{"text":"%s","tooltip":"%s","class":"%s"}\n' "$icon" "$(json_escape "$tooltip")" "$class"
@@ -688,6 +778,9 @@ case "${1:-apply}" in
     mode)
         set_mode_manual "$2"
         ;;
+    nightlight)
+        set_nightlight_mode "$2"
+        ;;
     config)
         set_config "$2" "$3"
         ;;
@@ -721,7 +814,8 @@ case "${1:-apply}" in
         loc=$(get_location)
         coords=$(format_coords)
         echo "Location: $loc ($coords)"
-        echo "Auto theme: $(systemctl --user is-enabled "$TIMER" 2>/dev/null) / $(systemctl --user is-active "$TIMER" 2>/dev/null)"
+        echo "Auto theme: $(theme_follows_sun && echo on || echo off) ($(systemctl --user is-enabled "$TIMER" 2>/dev/null) / $(systemctl --user is-active "$TIMER" 2>/dev/null))"
+        echo "Night light: $NIGHTLIGHT"
         echo "Daytime: $(is_daytime && echo "yes" || echo "no")"
         echo "Current mode: $(cat "$CONFIG_DIR/mode" 2>/dev/null || echo "unknown")"
         echo "Light theme: $LIGHT_THEME ${LIGHT_BACKGROUND:+(background: $LIGHT_BACKGROUND)}"
@@ -738,7 +832,7 @@ case "${1:-apply}" in
         get_sun_time set
         ;;
     *)
-        echo "Usage: omarchy-auto-theme [apply|light|dark|toggle|cycle|auto|mode|config|backgrounds|status-json|panel-json|trigger|schedule|enable|disable|status|sunrise|sunset]"
+        echo "Usage: omarchy-auto-theme [apply|light|dark|toggle|cycle|auto|mode|nightlight|config|backgrounds|status-json|panel-json|trigger|schedule|enable|disable|status|sunrise|sunset]"
         exit 1
         ;;
 esac

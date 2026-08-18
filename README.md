@@ -3,7 +3,8 @@
 An Omarchy (Quattro) shell plugin that switches between a light and a dark
 theme at sunrise and sunset, with a bar widget for choosing Light, Dark, or
 Auto and for picking which theme — and which of its backgrounds — each mode
-uses.
+uses. Night light has the same On / Off / Auto control and, in Auto, follows
+those same sun times via Omarchy's nightlight service.
 
 Applying a mode also retints Zed and the GTK/XDG colour scheme so the whole
 desktop moves together.
@@ -56,10 +57,16 @@ LIGHT_THEME="Flexoki Light"
 DARK_THEME="Matte Black"
 LIGHT_BACKGROUND=""   # filename within the theme; empty lets omarchy cycle
 DARK_BACKGROUND=""
+NIGHTLIGHT="off"      # on | off | auto (sunset on, sunrise off)
 LOCATION=""           # "LAT LON"; empty auto-detects by IP and caches for 24h
 ```
 
 The panel dropdowns write to this file.
+
+Night light Auto is independent of theme Auto. Either one keeps the sunrise/sunset
+timer running; turning both off stops it. On and Off call Omarchy's nightlight
+service (`omarchy-shell nightlight enable|disable`), the same path as
+`omarchy toggle nightlight`.
 
 ## Backgrounds
 
@@ -137,6 +144,7 @@ omarchy-auto-theme status         # location, mode, sun times, timer state
 omarchy-auto-theme mode light     # manual override, disables auto
 omarchy-auto-theme enable         # follow the sun
 omarchy-auto-theme disable [mode] # stop following, optionally settle on a mode
+omarchy-auto-theme nightlight auto  # on | off | auto
 omarchy-auto-theme config light "Catppuccin Latte"
 omarchy-auto-theme config dark-bg "1-dark-waters.jpg"   # "" to unpin
 omarchy-auto-theme backgrounds dark                     # what that theme offers

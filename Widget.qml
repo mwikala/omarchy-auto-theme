@@ -23,6 +23,7 @@ Panel {
 
   property string mode: ""
   property bool followSun: false
+  property string nightlight: "off"
   property string lightTheme: ""
   property string darkTheme: ""
   property string lightBackground: ""
@@ -57,6 +58,14 @@ Panel {
     return "Sunrise " + sunrise + " · Sunset " + sunset
   }
 
+  // Night light Auto follows the same sun times: on after sunset, off after sunrise.
+  readonly property string nightlightSchedule: {
+    if (nightlight !== "auto" || nextChange.indexOf(":") === -1) return ""
+    return (nextEvent === "sunrise" ? "On" : "Off")
+      + " until " + (nextEvent === "sunset" ? "sunset" : "sunrise")
+      + " at " + nextChange
+  }
+
   function refresh() {
     if (!stateProc.running) stateProc.running = true
   }
@@ -76,6 +85,11 @@ Panel {
       mode = value
     }
     run(value === "auto" ? "enable" : "mode " + value)
+  }
+
+  function selectNightlight(value) {
+    nightlight = value
+    run("nightlight " + value)
   }
 
   IpcHandler {
@@ -133,6 +147,7 @@ Panel {
           var s = JSON.parse(String(text || "").trim())
           root.mode = s.mode || ""
           root.followSun = s.auto === true
+          root.nightlight = s.nightlight || "off"
           root.lightTheme = s.lightTheme || ""
           root.darkTheme = s.darkTheme || ""
           root.lightBackground = s.lightBackground || ""
@@ -247,6 +262,55 @@ Panel {
           width: parent.width
           visible: root.schedule !== ""
           text: root.schedule
+          color: Qt.darker(root.panelForeground, 1.4)
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+
+        PanelSeparator {
+          width: parent.width
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+        }
+
+        PanelSectionHeader {
+          text: "NIGHT LIGHT"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+
+        Row {
+          id: nightlights
+          width: parent.width
+          spacing: Style.spacing.md
+
+          readonly property real segment: (width - spacing * 2) / 3
+
+          Repeater {
+            model: [
+              { value: "on", label: "On", icon: "󰃝" },
+              { value: "off", label: "Off", icon: "󰃞" },
+              { value: "auto", label: "Auto", icon: "󰔎" }
+            ]
+
+            Button {
+              required property var modelData
+              width: nightlights.segment
+              text: modelData.label
+              iconText: modelData.icon
+              bordered: true
+              selected: root.nightlight === modelData.value
+              foreground: root.panelForeground
+              fontFamily: root.panelFontFamily
+              onClicked: root.selectNightlight(modelData.value)
+            }
+          }
+        }
+
+        Text {
+          width: parent.width
+          visible: root.nightlightSchedule !== ""
+          text: root.nightlightSchedule
           color: Qt.darker(root.panelForeground, 1.4)
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
