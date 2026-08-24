@@ -25,6 +25,18 @@ ZED_SETTINGS="$HOME/.config/zed/settings.json"
 ZED_READABLE=(accent red yellow orange green cyan blue magenta purple brown
               bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta bright_purple)
 
+mkdir -p "$CONFIG_DIR"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    cat >"$CONFIG_FILE" <<'EOF'
+LIGHT_THEME="Flexoki Light"
+DARK_THEME="Matte Black"
+LIGHT_BACKGROUND=""
+DARK_BACKGROUND=""
+NIGHTLIGHT="off"
+LOCATION=""
+EOF
+fi
+
 source "$CONFIG_FILE"
 NIGHTLIGHT="${NIGHTLIGHT:-off}"
 

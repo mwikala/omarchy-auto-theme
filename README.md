@@ -52,6 +52,8 @@ timer. Update later with `omarchy plugin update mwikala.auto-theme`.
 
 `~/.config/omarchy/auto-theme/config`:
 
+The plugin creates this file with defaults on first use.
+
 ```bash
 LIGHT_THEME="Flexoki Light"
 DARK_THEME="Matte Black"
