@@ -1,0 +1,400 @@
+#!/bin/bash
+
+# Exercises bin/omarchy-auto-theme against a throwaway HOME. PATH holds only
+# mocks and a few real coreutils, so no live theme, service or display is used.
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+BASE="${TMPDIR:-/tmp}"
+[[ -d /tmp/opencode ]] && BASE=/tmp/opencode
+REAL_TOOLS=(bash env date jq flock awk find stat mktemp mv rm mkdir cat grep sort tr sed readlink
+            dirname basename head tail touch cmp ls chmod ln cp wc timeout rmdir)
+PASSED=0
+FAILED=0
+CURRENT=""
+
+setup() {
+    T=$(mktemp -d "$BASE/auto-theme-test.XXXXXX")
+    export HOME="$T/home"
+    PLUGIN="$T/my plugins %h/auto-theme"
+    MOCK="$T/mock"
+    S="$T/mockstate"
+    CONFIG="$HOME/.config/omarchy/auto-theme/config"
+    STATE="$HOME/.local/state/omarchy/auto-theme"
+    CURRENT_THEME="$HOME/.local/state/omarchy/current/theme.name"
+    UNITS="$HOME/.config/systemd/user"
+
+    mkdir -p "$HOME" "$PLUGIN/bin" "$MOCK" "$S" "$(dirname "$CURRENT_THEME")"
+    cp "$ROOT/bin/omarchy-auto-theme" "$PLUGIN/bin/"
+    cp -r "$ROOT/systemd" "$PLUGIN/"
+    for tool in "${REAL_TOOLS[@]}"; do ln -s "$(command -v "$tool")" "$MOCK/$tool"; done
+    cp -r "$ROOT/tests/mocks/." "$MOCK/"
+    for tool in omarchy-shell omarchy-theme-bg-next omarchy-theme-bg-set pgrep setsid uwsm-app; do
+        cp "$MOCK/log" "$MOCK/$tool"
+    done
+    printf '%s\n' "Flexoki Light" "Matte Black" "Tokyo Night" >"$S/themes"
+}
+
+teardown() {
+    [[ -f "$S/lingering" ]] && xargs kill <"$S/lingering" 2>/dev/null
+    rm -rf "$T"
+}
+
+cli() {
+    OUT=$(env -i HOME="$HOME" PATH="$MOCK" MOCK_STATE="$S" "$PLUGIN/bin/omarchy-auto-theme" "$@" 2>"$T/stderr")
+    RC=$?
+    ERR=$(<"$T/stderr")
+}
+
+calls() { cat "$S/calls" 2>/dev/null; }
+reset_calls() { rm -f "$S/calls"; }
+json() { jq -r "$1" <<<"$OUT"; }
+
+check() {
+    local message="$1"
+    shift
+    if "$@"; then
+        return 0
+    fi
+    echo "  FAIL [$CURRENT] $message" >&2
+    echo "    rc=$RC out=${OUT:0:300} err=${ERR:0:300}" >&2
+    FAILED_TEST=1
+}
+
+has_call() { calls | grep -Fq -- "$1"; }
+no_call() { ! has_call "$1"; }
+equals() { [[ "$1" == "$2" ]]; }
+
+configure() { mkdir -p "$(dirname "$CONFIG")"; printf '%s\n' "$@" >"$CONFIG"; }
+# Keeps tests away from the minutes either side of midnight.
+near_midnight() { local hm; hm=$(date +%H%M); [[ "$hm" > 2356 || "$hm" < 0004 ]]; }
+
+run_test() {
+    CURRENT="$1"
+    FAILED_TEST=0
+    setup
+    "$1"
+    teardown
+    if (( FAILED_TEST )); then
+        FAILED=$((FAILED + 1))
+        echo "not ok - $1"
+    else
+        PASSED=$((PASSED + 1))
+        echo "ok - $1"
+    fi
+}
+
+test_config_is_data() {
+    configure 'LIGHT_THEME="$(touch '"$T"'/pwned)"' "DARK_THEME=Matte Black; touch $T/pwned2" 'NIGHTLIGHT=`id`'
+    cli panel-json
+    check "panel succeeds" equals "$RC" 0
+    check "no substitution ran" test ! -e "$T/pwned" -a ! -e "$T/pwned2"
+    check "value is literal" equals "$(json .lightTheme)" "\$(touch $T/pwned)"
+    check "invalid nightlight falls back" equals "$(json .nightlight)" off
+}
+
+test_names_roundtrip() {
+    printf '%s\n' 'Flexoki Light' "Dollar \$HOME \\back 'tick'" >"$S/themes"
+    cli config dark "Dollar \$HOME \\back 'tick'"
+    check "unusual theme accepted" equals "$RC" 0
+    cli panel-json
+    check "theme roundtrips" equals "$(json .darkTheme)" "Dollar \$HOME \\back 'tick'"
+    cli config dark 'Has "quotes"'
+    check "quotes rejected" test "$RC" -ne 0 -a -n "$ERR"
+    cli config dark 'Nope'
+    check "unknown theme rejected" equals "$ERR" "Unknown theme: Nope"
+    check "rejection left config" grep -Fq "DARK_THEME=\"Dollar" "$CONFIG"
+}
+
+test_read_only_commands_write_nothing() {
+    cli panel-json
+    check "fresh panel defaults to automatic" equals "$(json .locationSource) $(json .issue)" "ip location"
+    cli status
+    check "fresh install writes nothing" test ! -e "$HOME/.config/omarchy"
+    check "no lookups" no_call curl
+}
+
+test_legacy_migration_is_conservative() {
+    configure 'LIGHT_THEME="Flexoki Light"' 'DARK_THEME="Tokyo Night"' 'LOCATION=""' 'NIGHTLIGHT="auto"'
+    cp "$CONFIG" "$T/before"
+    local legacy="$HOME/.config/omarchy/auto-theme"
+    echo 1 >"$legacy/auto"; echo light >"$legacy/mode"; echo 1790963160 >"$legacy/scheduled"
+    echo "51.5 -0.12" >"$legacy/location.cache"
+    cli panel-json
+    check "config untouched" cmp -s "$CONFIG" "$T/before"
+    check "state moved" equals "$(cat "$STATE/auto" "$STATE/mode")" $'1\nlight'
+    check "legacy schedule dropped" test ! -e "$legacy/scheduled"
+    check "legacy automatic location kept" equals "$(json .location) $(json .locationSource)" "51.5 -0.12 ip"
+    check "auto preserved" equals "$(json .auto)" true
+}
+
+test_oldest_install_uses_timer_state() {
+    configure 'LIGHT_THEME="Flexoki Light"'
+    echo active >"$S/is-active"
+    cli panel-json
+    check "active timer meant auto" equals "$(cat "$STATE/auto")" 1
+}
+
+test_manual_location_and_validation() {
+    cli location "91 0"
+    check "latitude out of range rejected" test "$RC" -ne 0 -a -n "$ERR"
+    check "nothing saved" test ! -e "$CONFIG"
+    cli location "-33.86 151.2"
+    check "manual location saved" equals "$RC" 0
+    cli panel-json
+    check "location reported" equals "$(json .location) $(json .locationSource)" "-33.86 151.2 manual"
+    check "sunwait got S/E" has_call "33.86S 151.2E"
+}
+
+IPINFO='{"ip":"203.0.113.9","city":"Leeds","region":"England","country":"GB","loc":"53.7997,-1.5492"}'
+
+test_automatic_location() {
+    echo "$IPINFO" >"$S/curl"
+    cli locate
+    check "locate succeeds" equals "$RC" 0
+    check "uses https ipinfo" has_call "curl -fsS --max-time 5 https://ipinfo.io/json"
+    check "locate saves no settings" test ! -e "$CONFIG"
+    cli panel-json
+    check "panel shows place" equals "$(json .location)|$(json .place)|$(json .locationSource)" "53.7997 -1.5492|Leeds|ip"
+    reset_calls
+    cli locate
+    check "fresh cache skips network" no_call curl
+
+    rm "$S/curl" "$STATE/location.cache"
+    cli locate
+    check "failure is reported" equals "$ERR" "Couldn't find your location. Set it manually or try later."
+    reset_calls
+    cli locate
+    check "failures are rate limited" no_call curl
+}
+
+test_offline_uses_last_automatic_fix() {
+    mkdir -p "$STATE"; echo "53.7997 -1.5492" >"$STATE/location.cache"; echo 1 >"$STATE/auto"
+    touch -d '2 days ago' "$STATE/location.cache"
+    cli trigger
+    check "stale fix still schedules" has_call "systemd-run --user"
+}
+
+test_manual_override_and_back() {
+    echo "$IPINFO" >"$S/curl"
+    cli location "40.7128, -74.006"
+    check "comma coordinates accepted" equals "$RC" 0
+    cli panel-json
+    check "manual wins" equals "$(json .location)|$(json .place)|$(json .locationSource)" "40.7128 -74.006||manual"
+    check "override needs no network" no_call curl
+    cli location auto
+    cli panel-json
+    check "automatic restored" equals "$(json .place) $(json .locationSource)" "Leeds ip"
+    cli location "53.72587 -1.36256" "Castleford"
+    cli panel-json
+    check "named place shown" equals "$(json .place) $(json .locationSource)" "Castleford manual"
+    check "name saved" grep -Fxq 'LOCATION_NAME="Castleford"' "$CONFIG"
+    cli location "53.7 -1.3" 'Bad "name"'
+    check "quoted names rejected" test "$RC" -ne 0 -a -n "$ERR"
+    cli location auto
+    check "automatic clears the name" grep -Fxq 'LOCATION_NAME=""' "$CONFIG"
+}
+
+test_location_off_stops_timers() {
+    configure 'LOCATION="51.5 -0.12"' 'NIGHTLIGHT="auto"'
+    cli location off
+    check "off succeeds" equals "$RC" 0
+    check "timers disabled" has_call "systemctl --user disable --now omarchy-auto-theme.timer"
+    check "nightlight preference kept" grep -Fxq 'NIGHTLIGHT="auto"' "$CONFIG"
+    cli panel-json
+    check "panel shows location issue" equals "$(json .issue)" location
+}
+
+test_theme_failure_keeps_state() {
+    configure 'LOCATION="51.5 -0.12"'
+    echo light >"$CURRENT_THEME"
+    mkdir -p "$STATE"; echo light >"$STATE/mode"; echo 1 >"$STATE/auto"
+    echo "Matte Black" >"$S/fail-themes"
+    cli mode dark
+    check "failure is nonzero" test "$RC" -ne 0
+    check "stderr explains" grep -q "Could not apply Matte Black" <<<"$ERR"
+    check "mode unchanged" equals "$(cat "$STATE/mode")" light
+    check "auto unchanged" equals "$(cat "$STATE/auto")" 1
+}
+
+test_enable_requirements() {
+    rm "$MOCK/sunwait"
+    configure 'LOCATION="51.5 -0.12"'
+    cli enable
+    check "missing sunwait reported" equals "$ERR" "Install sunwait to follow sunrise and sunset."
+    cli panel-json
+    check "panel issue sunwait" equals "$(json .issue)" sunwait
+}
+
+test_enable_generates_units_for_checkout() {
+    near_midnight && return
+    configure 'LOCATION="51.5 -0.12"'
+    echo NIGHT >"$S/poll"
+    cli enable
+    check "enable succeeds" equals "$RC" 0
+    check "dark applied" equals "$(cat "$CURRENT_THEME")" matte-black
+    local self; self=$(readlink -f "$PLUGIN/bin/omarchy-auto-theme")
+    check "service runs this checkout" grep -Fxq "ExecStart=\"${self//\%/%%}\" trigger" "$UNITS/omarchy-auto-theme.service"
+    check "condition names this checkout" grep -Fxq "ConditionPathExists=${self//\%/%%}" "$UNITS/omarchy-auto-theme.service"
+    check "timer generated" test -f "$UNITS/omarchy-auto-theme.timer"
+    check "timer enabled" has_call "systemctl --user enable --now omarchy-auto-theme.timer"
+    reset_calls
+    cli enable
+    check "unchanged units skip reload" no_call daemon-reload
+}
+
+test_scheduling() {
+    near_midnight && return
+    configure 'LOCATION="51.5 -0.12"'
+    mkdir -p "$STATE"; echo 1 >"$STATE/auto"
+    echo 00:00 >"$S/rise"; echo 23:59 >"$S/set"
+    cli trigger
+    local tomorrow; tomorrow=$(date -d "$(date +%F) 12:00 +1 day" +%F)
+    check "books a minute after sunset" has_call "--on-calendar=$tomorrow 00:00:00"
+    check "passes the phase" grep -q "omarchy-auto-theme trigger dark$" <(calls)
+    cli trigger
+    check "unique transient names" equals "$(calls | grep -o 'unit=omarchy-auto-theme-next-[0-9]*' | sort -u | wc -l)" 2
+    check "only one live booking survives" equals "$(wc -l <"$S/bookings")" 1
+    check "legacy booking stopped independently" has_call "stop omarchy-auto-theme-next.timer"
+    check "old bookings stopped" has_call "stop omarchy-auto-theme-next-*.timer"
+    cli panel-json
+    check "next change is sunset" equals "$(json .nextChange) $(json .nextEvent)" "23:59 sunset"
+
+    echo 00:01 >"$S/set"
+    reset_calls
+    cli trigger
+    check "after sunset books tomorrow's sunrise" has_call "--on-calendar=$tomorrow 00:01:00"
+    check "asks sunwait for tomorrow" has_call "d $(date -d "$tomorrow" +%-d) m $(date -d "$tomorrow" +%-m)"
+}
+
+test_scheduled_phase_wins() {
+    configure 'LOCATION="51.5 -0.12"' 'NIGHTLIGHT="auto"'
+    mkdir -p "$STATE"; echo 1 >"$STATE/auto"; echo light >"$STATE/mode"
+    echo flexoki-light >"$CURRENT_THEME"
+    echo DAY >"$S/poll"
+    cli trigger dark
+    check "booked phase applied despite poll" equals "$(cat "$STATE/mode")" dark
+    check "nightlight warmed" equals "$(cat "$S/temp")" 4000
+    reset_calls
+    cli trigger
+    check "hourly applies poll phase" equals "$(cat "$STATE/mode")" light
+    reset_calls
+    cli trigger
+    check "hourly no-op when unchanged" no_call omarchy-theme-set
+}
+
+test_polar() {
+    configure 'LOCATION="78.2 15.6"'
+    mkdir -p "$STATE"; echo 1 >"$STATE/auto"
+    echo polar >"$S/rise"; echo polar >"$S/set"; echo NIGHT >"$S/poll"
+    cli trigger
+    check "polar night is dark" equals "$(cat "$STATE/mode")" dark
+    check "checks after midnight" grep -q "omarchy-auto-theme trigger$" <(calls)
+    check "check booked" has_call "$(date -d "$(date +%F) 12:00 +1 day" +%F) 00:06:00"
+    cli panel-json
+    check "panel says polar" equals "$(json .issue)" polar
+}
+
+test_commands_serialize() {
+    configure 'LOCATION="51.5 -0.12"'
+    touch "$S/slow" "$S/linger"
+    local pids=() i
+    for i in 1 2 3 4; do
+        if (( i % 2 )); then cli mode light >/dev/null & else cli mode dark >/dev/null & fi
+        pids+=($!)
+    done
+    wait "${pids[@]}"
+    check "theme-set never overlapped" test ! -e "$S/overlap"
+    check "mode matches screen" equals "$(cat "$STATE/mode")" \
+        "$([[ "$(cat "$CURRENT_THEME")" == matte-black ]] && echo dark || echo light)"
+    SECONDS=0
+    cli mode light
+    check "lingering children do not hold the lock" test "$SECONDS" -lt 5
+}
+
+test_nightlight_and_preview() {
+    cli nightlight auto
+    check "auto needs location" equals "$ERR" "Couldn't find your location. Set it manually or try later."
+    check "auto refusal saves nothing" test ! -e "$CONFIG"
+    cli panel-json
+    check "names warmth by default" equals "$(json .temperatureDisplay)" name
+    cli temperature-display kelvin
+    cli panel-json
+    check "display choice saved" equals "$(json .temperatureDisplay)" kelvin
+    cli temperature-display fahrenheit
+    check "unknown display rejected" test "$RC" -ne 0 -a -n "$ERR"
+    rm -f "$CONFIG"
+    cli temperature 9000
+    check "range enforced" test "$RC" -ne 0 -a -n "$ERR"
+    cli nightlight on
+    check "on applies saved warmth" equals "$(cat "$S/temp")" 4000
+    cli preview-temperature 3000
+    check "preview applied" equals "$(cat "$S/temp")" 3000
+    check "watchdog spawned" grep -q "setsid -f .*omarchy-auto-theme preview-watchdog" <(calls)
+    cli cancel-preview
+    check "cancel restores saved" equals "$(cat "$S/temp")" 4000
+    check "preview cleared" test ! -e "$STATE/preview"
+    cli preview-temperature 3500
+    touch -d '1 minute ago' "$STATE/preview"
+    cli preview-watchdog
+    check "stale preview restored" equals "$(cat "$S/temp") $(test -e "$STATE/preview"; echo $?)" "4000 1"
+    cli temperature 3200
+    check "save applies" equals "$(cat "$S/temp")" 3200
+    cli nightlight off
+    check "off is neutral" equals "$(cat "$S/temp")" 6500
+    touch "$S/hypr-fail"
+    cli nightlight on
+    check "hyprsunset failure reported" grep -q "Could not set night light" <<<"$ERR"
+    check "failed mode keeps saved preference" grep -Fxq 'NIGHTLIGHT="off"' "$CONFIG"
+    cli temperature 5000
+    check "failed warmth keeps saved temperature" grep -Fxq 'NIGHTLIGHT_TEMPERATURE="3200"' "$CONFIG"
+}
+
+test_zed_left_alone() {
+    mkdir -p "$HOME/.config/zed/themes"
+    echo '{"theme": {"mode": "dark"}}' >"$HOME/.config/zed/settings.json"
+    echo '{"author":"omarchy-auto-theme"}' >"$HOME/.config/zed/themes/omarchy.json"
+    cp -r "$HOME/.config/zed" "$T/zed-before"
+    configure 'ZED="on"'
+    cli mode light
+    cli zed on
+    check "zed command retired" test "$RC" -ne 0 -a -n "$ERR"
+    cli uninstall --purge
+    check "zed files untouched" diff -r "$HOME/.config/zed" "$T/zed-before"
+}
+
+test_uninstall() {
+    configure 'LOCATION="51.5 -0.12"'
+    cli enable
+    check "enable succeeds" test -f "$UNITS/omarchy-auto-theme.timer"
+    mkdir -p "$UNITS/timers.target.wants"
+    ln -s ../omarchy-auto-theme.timer "$UNITS/timers.target.wants/omarchy-auto-theme.timer"
+    echo "[Unit]" >"$UNITS/unrelated.service"
+    reset_calls
+    cli uninstall
+    check "uninstall succeeds" equals "$RC" 0
+    check "units removed" test ! -e "$UNITS/omarchy-auto-theme.timer" -a ! -e "$UNITS/omarchy-auto-theme.service"
+    check "wants link removed" test ! -L "$UNITS/timers.target.wants/omarchy-auto-theme.timer"
+    check "other units kept" test -f "$UNITS/unrelated.service"
+    check "transient timers stopped" has_call "omarchy-auto-theme-next-*.timer"
+    check "settings kept" test -f "$CONFIG"
+    cli uninstall --purge
+    check "purge removes settings and state" test ! -e "$CONFIG" -a ! -e "$STATE"
+}
+
+test_legacy_linked_units_are_replaced() {
+    configure 'LOCATION="51.5 -0.12"'
+    mkdir -p "$UNITS"
+    ln -s "$PLUGIN/systemd/omarchy-auto-theme.service" "$UNITS/omarchy-auto-theme.service"
+    echo "custom" >"$UNITS/omarchy-auto-theme.timer"
+    cli enable
+    check "symlink replaced by generated unit" test ! -L "$UNITS/omarchy-auto-theme.service"
+    check "user's own unit left alone" equals "$(cat "$UNITS/omarchy-auto-theme.timer")" custom
+}
+
+TESTS=$(declare -F | awk '$3 ~ /^test_/ { print $3 }')
+for name in $TESTS; do
+    [[ -z "$1" || "$name" == *"$1"* ]] && run_test "$name"
+done
+
+echo "$PASSED passed, $FAILED failed"
+(( FAILED == 0 ))

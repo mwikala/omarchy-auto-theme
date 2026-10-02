@@ -1,0 +1,11 @@
+#!/bin/bash
+printf 'sunwait %s\n' "$*" >>"$MOCK_STATE/calls"
+case "$1" in
+    poll) cat "$MOCK_STATE/poll" 2>/dev/null || echo DAY ;;
+    list)
+        time=$(cat "$MOCK_STATE/$2" 2>/dev/null)
+        [[ "$2" == rise ]] && time=${time:-06:00} || time=${time:-18:00}
+        [[ "$time" == polar ]] && time="--:-- (Polar night)"
+        echo "$time"
+        ;;
+esac

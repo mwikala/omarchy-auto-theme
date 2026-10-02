@@ -1,0 +1,11 @@
+#!/bin/bash
+printf 'systemctl %s\n' "$*" >>"$MOCK_STATE/calls"
+if [[ "$2" == stop ]]; then
+    [[ "$*" == *'omarchy-auto-theme-next.timer'* ]] && exit 5
+    [[ "$*" == *'omarchy-auto-theme-next-*.timer'* ]] && rm -f "$MOCK_STATE/bookings"
+fi
+if [[ "$2" == is-active ]]; then
+    state=$(cat "$MOCK_STATE/is-active" 2>/dev/null || echo inactive)
+    echo "$state"
+    [[ "$state" == active ]]
+fi

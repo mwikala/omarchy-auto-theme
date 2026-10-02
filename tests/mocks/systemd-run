@@ -1,0 +1,6 @@
+#!/bin/bash
+printf 'systemd-run %s\n' "$*" >>"$MOCK_STATE/calls"
+for argument in "$@"; do
+    [[ "$argument" == --unit=* ]] && echo "${argument#--unit=}" >>"$MOCK_STATE/bookings"
+done
+exit 0

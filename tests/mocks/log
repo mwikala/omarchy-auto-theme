@@ -1,0 +1,3 @@
+#!/bin/bash
+# Records a call as one line, then succeeds.
+printf '%s\n' "$(basename "$0") $*" >>"$MOCK_STATE/calls"

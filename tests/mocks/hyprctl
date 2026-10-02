@@ -1,0 +1,4 @@
+#!/bin/bash
+printf 'hyprctl %s\n' "$*" >>"$MOCK_STATE/calls"
+[[ -e "$MOCK_STATE/hypr-fail" ]] && exit 1
+if [[ -n "$3" ]]; then echo "$3" >"$MOCK_STATE/temp"; echo ok; else cat "$MOCK_STATE/temp"; fi

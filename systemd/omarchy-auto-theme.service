@@ -1,6 +1,8 @@
 [Unit]
 Description=Apply theme based on sunrise/sunset and schedule next
 After=graphical-session.target
+ConditionPathExists=%h/.config/omarchy/plugins/mwikala.auto-theme/bin/omarchy-auto-theme
+ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=oneshot

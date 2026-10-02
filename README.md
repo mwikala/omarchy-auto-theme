@@ -1,171 +1,154 @@
 # Auto Theme
 
-An Omarchy (Quattro) shell plugin that switches between a light and a dark
-theme at sunrise and sunset, with a bar widget for choosing Light, Dark, or
-Auto and for picking which theme — and which of its backgrounds — each mode
-uses. Night light has the same On / Off / Auto control and, in Auto, follows
-those same sun times via Omarchy's nightlight service.
+Light at sunrise. Dark at sunset. Your choice in between.
 
-Applying a mode also retints Zed and the GTK/XDG colour scheme so the whole
-desktop moves together.
+A native **Omarchy Quattro** bar plugin for light/dark themes, backgrounds, and
+independent night light scheduling.
 
-![The Auto Theme panel: Light, Dark and Auto buttons above the theme and background
-pickers for each mode](screenshot.png)
+![Auto Theme panel](screenshot.png)
 
-## Layout
-
-```
-mwikala.auto-theme/
-├── manifest.json                    plugin declaration
-├── Widget.qml                       bar widget + popup panel
-├── bin/omarchy-auto-theme           engine: sun times, scheduling, theming
-├── templates/zed.json.tpl           Zed theme, rendered from the omarchy palette
-└── systemd/
-    ├── omarchy-auto-theme.service   applies the theme and schedules the next run
-    └── omarchy-auto-theme.timer     hourly safety net
-```
-
-Everything resolves relative to this directory. The QML finds the script via
-`Qt.resolvedUrl`, the script finds its units via `$SCRIPT_DIR`, and the service
-unit uses `%h/.config/omarchy/plugins/mwikala.auto-theme/`.
+- **Light / Dark / Auto** — switch manually or follow the sun.
+- **Night light** — On / Off / Auto, with a saved warmth setting from 2500–5500K.
+- **Your pair** — choose a theme and background for each mode, side by side.
+- **Native controls** — theme-aware colours, keyboard navigation, and reduced-motion support.
 
 ## Install
 
-`sunwait` is not in the Arch repositories and there is no fallback for it — without
-it every hour reads as night and the theme never leaves dark. Install it first:
+Requires Omarchy Quattro with its Quickshell-based shell. Classic Waybar-based
+Omarchy is not supported.
 
 ```bash
 yay -S sunwait
 omarchy plugin add https://github.com/mwikala/omarchy-auto-theme.git --enable
 ```
 
-Then add the widget to the bar and click Auto in its panel, which links and starts the
-timer. Update later with `omarchy plugin update mwikala.auto-theme`.
+Add **Auto Theme** to your bar through Omarchy's bar settings. Location is
+found automatically; there is nothing to set up.
 
-## Requirements
-
-- `sunwait` for sunrise/sunset times (AUR)
-- `omarchy-theme-set` and `omarchy-theme-color` (ship with Omarchy)
-- `jq`
-
-## Configuration
-
-`~/.config/omarchy/auto-theme/config`:
-
-The plugin creates this file with defaults on first use.
+`sunwait` is an AUR dependency. Other runtime dependencies are Bash, GNU coreutils,
+findutils, awk, grep, jq, curl, util-linux (`flock`), systemd user services, and
+Omarchy's theme/shell commands. Night light uses Omarchy's `hyprsunset`.
 
 ```bash
-LIGHT_THEME="Flexoki Light"
-DARK_THEME="Matte Black"
-LIGHT_BACKGROUND=""   # filename within the theme; empty lets omarchy cycle
-DARK_BACKGROUND=""
-NIGHTLIGHT="off"      # on | off | auto (sunset on, sunrise off)
-LOCATION=""           # "LAT LON"; empty auto-detects by IP and caches for 24h
+omarchy plugin update mwikala.auto-theme
 ```
 
-The panel dropdowns write to this file.
+## Using the panel
 
-Night light Auto is independent of theme Auto. Either one keeps the sunrise/sunset
-timer running; turning both off stops it. On and Off call Omarchy's nightlight
-service (`omarchy-shell nightlight enable|disable`), the same path as
-`omarchy toggle nightlight`.
+The header shows the current mode and the next sunrise or sunset. Hover the
+time to see which location it uses; click it to switch between **Automatic** and
+**Manual**. Theme Auto and night light Auto are independent; either can keep
+the scheduler running.
 
-## Backgrounds
+Drag the warmth slider right for warmer colours. The readout ranges from
+**Subtle** to **Candlelight**; click or middle-click it to switch to Kelvin.
+Release to save. When night light is inactive, the display returns to neutral
+and uses the saved warmth at its next activation.
 
-Omarchy has no notion of a theme's default background: `omarchy-theme-set`
-takes the image one past whatever the previous theme was showing, which never
-matches, so it always lands on the theme's first file. Pinning a background
-here makes a theme come up on the same image every time.
+Middle-click or double-click the slider to reset to **Warm (4000K)**. With the
+slider focused, Delete or Backspace does the same. Arrow keys adjust warmth.
 
-A pin is a filename, resolved against the same directories
-`omarchy-theme-bg-next` searches — `~/.config/omarchy/backgrounds/<theme>/`
-first, then the theme's own `backgrounds/`. Cycling from a pinned image
-therefore continues from it rather than jumping back to the first.
+Expand **Themes** to change either theme/background pair. **Default** lets Omarchy
+choose the background; choosing a filename pins that image. Changing a theme
+clears its old background pin. Hover a picker to read a truncated name.
 
-When a background is pinned, the theme is applied with
-`OMARCHY_THEME_SKIP_BACKGROUND=1` and the image set afterwards, so omarchy's
-own choice never flashes on screen first. If the file has since disappeared
-from the theme, it falls back to `omarchy-theme-bg-next`. Changing a slot's
-theme clears its pin, since the filename belonged to the old theme.
+Tab moves between controls; Enter/Space activates them; arrow keys adjust warmth
+or navigate an open picker. Escape closes a picker first, then the panel.
 
-## Zed
+Omarchy's own night-light toggle uses its stock 4000K. This plugin's controls and
+schedule use your saved temperature.
 
-Zed is themed from the palette rather than by naming a theme installed in the
-editor, so a new omarchy theme needs no counterpart looking up and installing.
+## Location and privacy
 
-`templates/zed.json.tpl` is a Zed theme with `{{ key }}` placeholders. Both
-slots are rendered from their theme's `colors.toml` — resolved through
-`omarchy-theme-color --all`, the same parser omarchy's own templates use — into
-a single `~/.config/zed/themes/omarchy.json` holding `Omarchy Light` and
-`Omarchy Dark`. Applying a mode then only has to flip `theme.mode`, and Zed
-picks the regenerated colours up without a restart.
+Location is **automatic** by default: the plugin asks **https://ipinfo.io/json**
+for the approximate location of your internet connection, then shows the nearest
+town in the panel. The lookup is cached for 24 hours, failures are retried at
+most hourly, and the last known location is kept while offline. It works the
+same on Ethernet and Wi-Fi.
 
-Scopes follow omarchy's own `vscode-theme.json.tpl` and `helix.toml.tpl` rather
-than a fresh set of guesses, so a file looks the same in Zed as it does in
-Helix, neovim or VS Code under the same theme. Tags are yellow, punctuation and
-delimiters recede to `dark_foreground`, and comments get a `dim` tone derived
-from the palette's `muted` grey.
+A VPN or some mobile networks can put that estimate somewhere else. Choose
+**Manual** and search for your town or city instead; suggestions come from the
+[Open-Meteo geocoding API](https://open-meteo.com/en/docs/geocoding-api)
+(location data from [GeoNames](https://www.geonames.org)), which receives only
+what you type. Pasting coordinates (`51.51, -0.13`) also works. Once saved, a
+manual location is never sent anywhere. Switch back to **Automatic** at any time.
 
-A palette's hues are chosen for a terminal, where one of them colours a prompt
-rather than every tag in a file: Flexoki Light's yellow sits at 2.3:1 on its own
-background. Three floors are therefore applied against the background, each by
-blending toward the foreground — 4.5:1 for the hues, 3.5:1 for punctuation, 3:1
-for comments, so the two recessive tones keep their order. Backgrounds and the
-ANSI `colorN` keys are exempt: the first are meant to recede, and the last have
-to keep matching the real terminal.
+City search uses Open-Meteo's free non-commercial API, subject to its
+[terms and rate limits](https://open-meteo.com/en/terms). The provider also sees
+your connection's IP address. Search requests are debounced; no API key is
+needed for personal use.
 
-Blending toward the foreground rather than toward the next grey up is deliberate.
-Everforest's `dark_foreground` is itself 1.7:1, so a blend toward it never
-converges, and White and Vantablack order the two greys the opposite way round
-to every other theme.
+The plugin stores configuration in `~/.config/omarchy/auto-theme/config` and
+runtime state, including cached coordinates, under
+`${XDG_STATE_HOME:-~/.local/state}/omarchy/auto-theme/`.
+The config resembles shell assignments but is read as data, never executed.
 
-All 22 stock themes clear these floors. What the floors cannot fix is a palette
-with fewer distinct hues than there are roles — Retro 82 resolves `blue`,
-`magenta` and `purple` to one teal, and 11 of the 22 alias `bright_blue` to
-`blue`, which merges operators into functions. Those collapses are in the
-palette, and show up identically in omarchy's own VS Code and Helix themes.
+## Scheduling
 
-The `theme` block in `~/.config/zed/settings.json` is rewritten in place with
-`sed`; it is JSONC and trailing commas would not survive a jq round trip.
+Automation creates user-level systemd timers: an hourly recovery check and a
+one-shot timer for the next sunrise or sunset. Boundaries run one minute after
+the reported sun time to avoid rounding disagreements. Polar days/nights keep
+the current solar phase and retry when another boundary becomes available.
 
-VS Code, VSCodium and Cursor are left to `omarchy-theme-set-vscode`, which
-already installs the theme a stock theme asks for and otherwise generates one
-from `colors.toml`. Setting them here only fought with it.
+The hourly check catches a missed transition after sleep. Manual theme changes
+made outside the plugin are preserved until the next solar phase change.
+
+## Application themes
+
+Theme changes use Omarchy's built-in theme support, including supported apps
+such as Zed. The plugin does not generate custom Zed palettes or edit its
+settings. Existing personal Zed theme files are retained when upgrading.
 
 ## CLI
 
-The panel covers everything below, so the engine stays in the plugin rather than on
-`PATH`. Put it there yourself if you want it:
+The engine lives inside the plugin; it need not be on `PATH`.
 
 ```bash
-ln -s ~/.config/omarchy/plugins/mwikala.auto-theme/bin/omarchy-auto-theme ~/.local/bin/
+engine=~/.config/omarchy/plugins/mwikala.auto-theme/bin/omarchy-auto-theme
+
+"$engine" status
+"$engine" mode light
+"$engine" enable
+"$engine" disable
+"$engine" nightlight auto
+"$engine" temperature 3600
+"$engine" temperature-display kelvin
+"$engine" location auto
+"$engine" location "51.5074 -0.1278" London
+"$engine" location off
+"$engine" config light "Flexoki Light"
+"$engine" config dark-bg "1-dark-waters.jpg"
+"$engine" backgrounds dark
 ```
+
+## Remove
+
+**Clean up the scheduler before removing the plugin directory:**
 
 ```bash
-omarchy-auto-theme status         # location, mode, sun times, timer state
-omarchy-auto-theme mode light     # manual override, disables auto
-omarchy-auto-theme enable         # follow the sun
-omarchy-auto-theme disable [mode] # stop following, optionally settle on a mode
-omarchy-auto-theme nightlight auto  # on | off | auto
-omarchy-auto-theme config light "Catppuccin Latte"
-omarchy-auto-theme config dark-bg "1-dark-waters.jpg"   # "" to unpin
-omarchy-auto-theme backgrounds dark                     # what that theme offers
-omarchy-auto-theme panel-json     # state consumed by the panel
+~/.config/omarchy/plugins/mwikala.auto-theme/bin/omarchy-auto-theme uninstall
+omarchy plugin remove mwikala.auto-theme
 ```
 
-## How the panel stays current
+Uninstall stops automation and removes its user-service links. Your selected
+desktop theme remains in place. Configuration is retained for a later install.
+Use `uninstall --purge` instead to also remove plugin configuration and runtime
+state. Existing personal Zed themes and settings are retained.
 
-The script pushes state after applying a change:
+Hiding or disabling a bar widget is not an uninstall. Run the engine's
+`uninstall` command first if you want to stop all automation.
+
+## Development checks
 
 ```bash
-omarchy-shell -q mwikala.auto-theme refresh
+tests/run
+tests/ui-run
+omarchy plugin validate .
 ```
 
-`Widget.qml` replaces `Panel`'s built-in IPC handler (`manageIpc: false`) to
-expose `refresh` alongside `open`/`close`/`toggle` — the base only provides the
-latter, so without this the push is silently dropped and the panel falls back to
-its 60s poll. Clicks also paint optimistically, so the control never lags.
+Backend tests isolate state and mock external commands and network requests.
+UI checks run offscreen through Quickshell without changing your desktop.
 
 ## License
 
-MIT
+MIT — [Mwikala Kangwa](LICENSE).

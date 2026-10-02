@@ -1,0 +1,3 @@
+#!/bin/bash
+printf 'curl %s\n' "$*" >>"$MOCK_STATE/calls"
+cat "$MOCK_STATE/curl" 2>/dev/null || exit 22

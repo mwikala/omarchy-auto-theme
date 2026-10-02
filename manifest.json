@@ -2,16 +2,17 @@
   "schemaVersion": 1,
   "id": "mwikala.auto-theme",
   "name": "Auto Theme",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "author": "Mwikala Kangwa",
-  "description": "Sunrise/sunset light-dark theme and night light switching with manual override.",
+  "license": "MIT",
+  "description": "Switch Omarchy between light and dark themes at sunrise and sunset, with night light scheduling and warmth control.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "Widget.qml"
   },
   "barWidget": {
     "displayName": "Auto Theme",
-    "description": "Light/dark mode indicator. Left click cycles mode, right click toggles automatic switching.",
+    "description": "Theme mode, night light, and per-mode theme settings.",
     "category": "Appearance",
     "allowMultiple": false,
     "defaults": {

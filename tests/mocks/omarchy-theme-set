@@ -1,0 +1,15 @@
+#!/bin/bash
+printf 'omarchy-theme-set %s skip=%s\n' "$*" "$OMARCHY_THEME_SKIP_BACKGROUND" >>"$MOCK_STATE/calls"
+if grep -Fxq -- "$1" "$MOCK_STATE/fail-themes" 2>/dev/null; then
+    echo "Theme '$1' does not exist"
+    exit 1
+fi
+mkdir "$MOCK_STATE/busy" 2>/dev/null || touch "$MOCK_STATE/overlap"
+[[ -e "$MOCK_STATE/slow" ]] && /usr/bin/sleep 0.3
+# Like omarchy-theme-set, leave a background process behind.
+if [[ -e "$MOCK_STATE/linger" ]]; then
+    /usr/bin/sleep 20 >/dev/null 2>&1 &
+    echo $! >>"$MOCK_STATE/lingering"
+fi
+echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' >"$HOME/.local/state/omarchy/current/theme.name"
+rmdir "$MOCK_STATE/busy"

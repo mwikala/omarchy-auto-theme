@@ -1,0 +1,6 @@
+#!/bin/bash
+case "$*" in
+    *name=Paris*) sleep 0.3; echo '{"results":[{"name":"Paris","latitude":48.86,"longitude":2.35}]}' ;;
+    *name=Berlin*) echo '{"results":[{"name":"Berlin","latitude":52.52,"longitude":13.41}]}' ;;
+    *) exit 22 ;;
+esac
