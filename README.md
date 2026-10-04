@@ -17,6 +17,8 @@ independent night light scheduling.
 Requires Omarchy Quattro with its Quickshell-based shell. Classic Waybar-based
 Omarchy is not supported.
 
+Supports stable Omarchy 4.0.4 and newer Quattro shells with socket IPC.
+
 ```bash
 yay -S sunwait
 omarchy plugin add https://github.com/mwikala/omarchy-auto-theme.git --enable
@@ -148,6 +150,8 @@ omarchy plugin validate .
 
 Backend tests isolate state and mock external commands and network requests.
 UI checks run offscreen through Quickshell without changing your desktop.
+The UI check also loads the widget's IPC handler. Test another shell with
+`OMARCHY_PATH=/path/to/omarchy tests/ui-run`.
 
 ## License
 

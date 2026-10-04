@@ -11,6 +11,13 @@ for module in Commons Ui; do
     ln -s "${OMARCHY_PATH:-/usr/share/omarchy}/shell/$module" "$sandbox/$module"
 done
 cp "$root"/{Choice,Location,Segments,Warmth}.qml "$sandbox/"
+# Test the actual IPC block without loading the layer-shell popup offscreen.
+{ printf '%s\n' 'import QtQuick' 'import Quickshell.Io' 'import qs.Commons' 'Item { id: root'
+  printf '%s\n' 'property string ipcTarget: "auto-theme-test"' 'property int refreshes: 0'
+  printf '%s\n' 'property alias handler: ipcHandler' 'function refresh() { refreshes++ }'
+  sed -n '/^  IpcHandler {$/,/^  }$/p' "$root/Widget.qml"
+  printf '%s\n' '}'
+} >"$sandbox/WidgetIpc.qml"
 cp "$root/tests/ui.qml" "$sandbox/shell.qml"
 mkdir "$sandbox/bin"
 cp "$root/tests/ui-curl" "$sandbox/bin/curl"

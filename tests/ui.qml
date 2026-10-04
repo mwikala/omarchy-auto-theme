@@ -5,6 +5,8 @@ import Quickshell.Io
 import qs.Commons
 
 ShellRoot {
+  WidgetIpc { id: ipc }
+
   Window {
     id: window
     visible: true
@@ -47,6 +49,12 @@ ShellRoot {
       interval: 100
       running: true
       onTriggered: {
+        if (typeof IpcRegistry !== "undefined") {
+          window.check(IpcRegistry.handlerFor(ipc.ipcTarget) === ipc.handler, "socket IPC registration")
+          window.check(IpcRegistry.call(ipc.ipcTarget, "refresh", []).ran, "socket IPC dispatch")
+        } else ipc.handler.refresh()
+        window.check(ipc.refreshes === 1, "IPC refresh")
+        ipc.handler.destroy()
         window.check(choice.menuWidth() > choice.width, "long names must widen popup")
         window.check(city.coordinates("51.51, -0.13") === "51.51 -0.13", "coordinate normalization")
         window.check(city.coordinates("91, 2") === "", "coordinate bounds")
@@ -90,9 +98,11 @@ ShellRoot {
       interval: 1100
       running: true
       onTriggered: {
+        if (typeof IpcRegistry !== "undefined")
+          window.check(!IpcRegistry.handlerFor(ipc.ipcTarget), "socket IPC cleanup")
         window.check(city.suggestions.length === 0 && !city.editing, "cancelled search must stay closed")
         console.log(window.failures.length ? "FAIL: " + window.failures.join(", ")
-          : "PASS: popup widths, screen bounds, coordinates, geocoder validation, city-search races, slider reset")
+          : "PASS: popup widths, screen bounds, coordinates, geocoder validation, city-search races, slider reset, widget IPC")
         Qt.quit()
       }
     }

@@ -184,7 +184,16 @@ Panel {
     return base.charAt(0).toUpperCase() + base.slice(1)
   }
 
-  ShellIpc {
+  IpcHandler {
+    id: ipcHandler
+
+    // Newer Quattro shells also route IPC through their socket registry.
+    Component.onCompleted: {
+      if (typeof IpcRegistry !== "undefined") IpcRegistry.register(ipcHandler)
+    }
+    Component.onDestruction: {
+      if (typeof IpcRegistry !== "undefined") IpcRegistry.unregister(ipcHandler)
+    }
     target: root.ipcTarget
 
     function open(): void { root.open() }
