@@ -17,4 +17,4 @@ cp "$root/tests/ui-curl" "$sandbox/bin/curl"
 PATH="$sandbox/bin:$PATH" QT_QPA_PLATFORM=offscreen timeout 10 quickshell -p "$sandbox/shell.qml" --no-color >"$sandbox/log" 2>&1
 cat "$sandbox/log"
 grep -q 'PASS: popup widths' "$sandbox/log"
-! grep -Eq 'FAIL:|ERROR:|ReferenceError|TypeError' "$sandbox/log"
+! grep -Eq 'FAIL:|ERROR:|ReferenceError|TypeError|Unable to assign' "$sandbox/log"

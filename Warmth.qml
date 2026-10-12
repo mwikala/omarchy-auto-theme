@@ -1,12 +1,13 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
 
   property int temperature: 4000
   property int standard: 4000
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property bool active: false
   readonly property bool dragging: pointer.pressed
   property int preview: temperature
@@ -78,7 +79,7 @@ Item {
     color: root.foreground
     opacity: root.active || root.dragging || root.activeFocus ? 1 : 0.5
     border.width: root.activeFocus ? Style.space(2) : 0
-    border.color: Color.accent
+    border.color: Commons.Color.accent
   }
 
   MouseArea {

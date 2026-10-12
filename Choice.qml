@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 ComboBox {
@@ -9,9 +10,9 @@ ComboBox {
   property string label: ""
   property string value: ""
   property var options: []
-  property color foreground: Color.popups.text
+  property color foreground: Commons.Color.popups.text
   property string fontFamily: Style.font.family
-  readonly property var borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, Style.normalBorderWidth)
+  readonly property var borderSpec: Border.localOrSurfaceSpec("popups", "border", Commons.Color.popups.border, Commons.Color.popups.border, Style.normalBorderWidth)
   readonly property bool popupOpen: popup.opened
 
   signal changed(string value)
@@ -60,8 +61,8 @@ ComboBox {
   background: BorderSurface {
     id: frame
     radius: Style.cornerRadius
-    color: Style.controlFill(root.activeFocus, root.hovered, root.foreground, Color.accent)
-    borderSpec: Border.controlSpec(root.activeFocus ? "focus" : (root.hovered ? "hover-cursor" : "normal"), root.foreground, Color.accent)
+    color: Style.controlFill(root.activeFocus, root.hovered, root.foreground, Commons.Color.accent)
+    borderSpec: Border.controlSpec(root.activeFocus ? "focus" : (root.hovered ? "hover-cursor" : "normal"), root.foreground, Commons.Color.accent)
   }
 
   contentItem: Text {
@@ -96,7 +97,7 @@ ComboBox {
 
     background: Rectangle {
       color: option.highlighted || option.hovered
-        ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+        ? Style.hoverFillFor(root.foreground, Commons.Color.accent) : "transparent"
     }
 
     contentItem: Text {
@@ -104,7 +105,7 @@ ComboBox {
       text: option.modelData.label
       font: root.font
       color: option.highlighted || option.hovered
-        ? Style.hoverStateColor(root.foreground, Color.accent) : root.foreground
+        ? Style.hoverStateColor(root.foreground, Commons.Color.accent) : root.foreground
       verticalAlignment: Text.AlignVCenter
       elide: Text.ElideRight
     }
@@ -133,7 +134,7 @@ ComboBox {
     bottomPadding: Border.bottom(root.borderSpec) + Style.spacing.hairline
 
     background: BorderSurface {
-      color: Color.popups.background
+      color: Commons.Color.popups.background
       borderSpec: root.borderSpec
       radius: Style.cornerRadius
     }

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 BorderSurface {
@@ -7,7 +8,7 @@ BorderSurface {
 
   property var options: []
   property string value: ""
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
   property string caption: ""
 
@@ -15,7 +16,7 @@ BorderSurface {
 
   implicitHeight: Style.spacing.controlHeight + Style.spacing.xs * 2
   radius: Style.cornerRadius
-  color: Style.normalFillFor(foreground, Color.accent)
+  color: Style.normalFillFor(foreground, Commons.Color.accent)
 
   Row {
     id: row

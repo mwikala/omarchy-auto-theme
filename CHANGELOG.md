@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- Fix dropdown surfaces and control colours resolving to Qt's `Color` type instead of Omarchy's theme palette.
+- Check open-menu palette updates and reopened menus in UI regression tests.
+
 ## 1.2.0
 
 - Compact panel with matching mode controls and side-by-side theme/background pickers.

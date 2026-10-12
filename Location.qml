@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 Column {
@@ -10,8 +11,8 @@ Column {
   property string place: ""
   property string source: "ip"
   property bool locating: false
-  property color foreground: Color.foreground
-  property color dim: Color.foreground
+  property color foreground: Commons.Color.foreground
+  property color dim: Commons.Color.foreground
   property string fontFamily: Style.font.family
   property bool editing: false
   property string error: ""
@@ -221,7 +222,7 @@ Column {
         width: parent.width
         height: suggestion.implicitHeight + Style.space(12)
         radius: Style.cornerRadius
-        color: current ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+        color: current ? Style.hoverFillFor(root.foreground, Commons.Color.accent) : "transparent"
 
         Row {
           id: suggestion
@@ -238,7 +239,7 @@ Column {
             width: Math.min(implicitWidth, parent.width * 0.6)
             elide: Text.ElideRight
             text: modelData.name
-            color: current ? Style.hoverStateColor(root.foreground, Color.accent) : root.foreground
+            color: current ? Style.hoverStateColor(root.foreground, Commons.Color.accent) : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
           }
