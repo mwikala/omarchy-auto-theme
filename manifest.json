@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mwikala.auto-theme",
   "name": "Auto Theme",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": "Mwikala Kangwa",
   "license": "MIT",
   "description": "Switch Omarchy between light and dark themes at sunrise and sunset, with night light scheduling and warmth control.",

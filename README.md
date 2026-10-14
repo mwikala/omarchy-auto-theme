@@ -78,6 +78,11 @@ City search uses Open-Meteo's free non-commercial API, subject to its
 your connection's IP address. Search requests are debounced; no API key is
 needed for personal use.
 
+The city-search field exists only while explicitly editing. Saving, cancelling,
+closing the panel, or switching to Automatic destroys it. Unfocused input is
+read-only to avoid Qt's background clipboard checks; focused editing uses Qt's
+normal clipboard implementation. To change a saved city, click **Manual** again.
+
 The plugin stores configuration in `~/.config/omarchy/auto-theme/config` and
 runtime state, including cached coordinates, under
 `${XDG_STATE_HOME:-~/.local/state}/omarchy/auto-theme/`.
@@ -148,6 +153,14 @@ omarchy plugin validate .
 
 Backend tests isolate state and mock external commands and network requests.
 UI checks run offscreen through Quickshell without changing your desktop.
+
+An optional native Qt clipboard regression requires a C++ compiler, Qt development
+headers, and `pkg-config`. It uses an in-process test clipboard in an offscreen
+application, not your desktop clipboard:
+
+```bash
+tests/clipboard-run
+```
 
 ## License
 

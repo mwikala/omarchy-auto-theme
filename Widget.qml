@@ -203,7 +203,7 @@ Panel {
 
   function toggleLocation() {
     locationOpen = !locationOpen
-    if (locationOpen) locationEditor.reset()
+    locationEditor.reset()
   }
 
   onOpenedChanged: {
@@ -415,7 +415,7 @@ Panel {
 
         Location {
           id: locationEditor
-          visible: root.locationOpen
+          visible: root.opened && root.locationOpen
           width: parent.width
           location: root.location
           place: root.place

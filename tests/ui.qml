@@ -13,6 +13,7 @@ ShellRoot {
     height: 600
     property var failures: []
     property bool restored: false
+    property var saved: ({})
 
     function check(condition, message) {
       if (!condition) failures.push(message)
@@ -41,15 +42,24 @@ ShellRoot {
     }
 
     function query(name) {
-      city.editing = true
+      city.edit()
       city.revision++
       city.suggestions = []
-      for (var child of city.children)
-        if (child.placeholderText === "Search city") child.text = name
+      city.query = name
       city.lookup()
     }
 
+    function input(node) {
+      if (node.placeholderText === "Search city") return node
+      for (var child of node.children || []) {
+        var field = input(child)
+        if (field) return field
+      }
+      return null
+    }
+
     Column {
+      id: controls
       Choice {
         id: choice
         width: 120
@@ -66,10 +76,28 @@ ShellRoot {
       function onCommitted(temperature) { window.restored = temperature === 4000 }
     }
 
+    Connections {
+      target: city
+      function onSave(coordinates, name) { window.saved = { coordinates: coordinates, name: name } }
+    }
+
     Timer {
       interval: 100
       running: true
       onTriggered: {
+        window.check(!window.input(city), "automatic location must not create an input")
+        city.source = "manual"
+        city.place = "London"
+        window.check(!window.input(city), "saved manual location must not create an input")
+        city.edit()
+        var field = window.input(city)
+        window.check(field && field.text === "London", "manual edit must create the saved city input")
+        window.check(field && field.width === city.width && field.height > 0, "loaded input must retain its layout")
+        choice.forceActiveFocus()
+        window.check(field && field.readOnly, "unfocused input must not read clipboard text")
+        if (field) field.forceActiveFocus()
+        window.check(field && !field.readOnly, "focused manual input must remain editable")
+        city.source = "ip"
         window.check(choice.menuWidth() > choice.width, "long names must widen popup")
         window.check(city.coordinates("51.51, -0.13") === "51.51 -0.13", "coordinate normalization")
         window.check(city.coordinates("91, 2") === "", "coordinate bounds")
@@ -78,6 +106,7 @@ ShellRoot {
         city.revision = 3
         city.reset()
         window.check(!city.editing && city.revision === 4, "reset must invalidate active searches")
+        window.check(!window.input(city), "reset must destroy the input")
         warmth.adjust(2500)
         warmth.restore()
         window.check(warmth.preview === 4000 && window.restored, "slider reset")
@@ -110,6 +139,7 @@ ShellRoot {
         window.check(city.suggestions.length === 1 && city.suggestions[0].name === "Berlin", "latest city query must win")
         window.query("Paris")
         city.reset()
+        window.check(!window.input(city), "cancelling a pending search must destroy the input")
         choice.close()
       }
     }
@@ -123,8 +153,32 @@ ShellRoot {
         window.check(city.suggestions.length === 0 && !city.editing, "cancelled search must stay closed")
         window.checkPalette("#15191e", "#e6eef5")
         choice.close()
+        city.source = "manual"
+        city.edit()
+        var field = window.input(city)
+        if (field) {
+          field.text = "Berlin"
+          field.textEdited()
+        }
+        window.check(city.query === "Berlin", "editing must update the search query")
+        city.pick({ name: "Berlin", latitude: 52.52, longitude: 13.41 })
+        window.check(!window.input(city), "selecting a city must destroy the input")
+        window.check(window.saved.name === "Berlin" && window.saved.coordinates === "52.52 13.41", "city selection must save coordinates")
+        city.edit()
+        city.query = "51.51, -0.13"
+        city.commit()
+        window.check(!window.input(city) && window.saved.coordinates === "51.51 -0.13", "saving coordinates must destroy the input")
+        city.edit()
+        controls.visible = false
+        window.check(!window.input(city) && !city.editing, "hiding the panel must destroy and reset the input")
+        controls.visible = true
+        window.check(!window.input(city), "reopening the panel must not recreate an input")
+        city.edit()
+        for (var child of city.children)
+          if (child.caption === "Location") child.selected("auto")
+        window.check(!window.input(city) && !city.editing, "automatic mode must destroy the input")
         console.log(window.failures.length ? "FAIL: " + window.failures.join(", ")
-          : "PASS: popup widths, palette changes, screen bounds, coordinates, geocoder validation, city-search races, slider reset")
+          : "PASS: popup widths, palette changes, screen bounds, coordinates, geocoder validation, city-search races, editor lifetime, slider reset")
         Qt.quit()
       }
     }

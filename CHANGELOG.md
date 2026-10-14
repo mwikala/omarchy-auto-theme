@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2
+
+- Create the city-search field only during explicit manual editing, and destroy it when saved, cancelled, hidden, or switched to Automatic.
+- Keep unfocused input read-only so Qt does not fetch clipboard text for background paste-availability checks.
+- Add editor-lifetime, focus, city-selection, and coordinate-save regression checks.
+
 ## 1.2.1
 
 - Fix dropdown surfaces and control colours resolving to Qt's `Color` type instead of Omarchy's theme palette.

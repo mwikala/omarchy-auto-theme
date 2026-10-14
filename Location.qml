@@ -15,6 +15,7 @@ Column {
   property color dim: Commons.Color.foreground
   property string fontFamily: Style.font.family
   property bool editing: false
+  property string query: ""
   property string error: ""
   property var suggestions: []
   property int highlighted: 0
@@ -28,6 +29,7 @@ Column {
   signal automatic()
 
   spacing: Style.spacing.md
+  onVisibleChanged: if (!visible) reset()
 
   function reset() {
     revision++
@@ -35,28 +37,31 @@ Column {
     error = ""
     suggestions = []
     search.stop()
-    field.text = source === "manual" ? place : ""
+    query = source === "manual" ? place : ""
   }
 
   function edit() {
+    if (!editing) query = source === "manual" ? place : ""
     editing = true
     error = ""
-    field.selectAll()
-    field.forceActiveFocus()
+    if (editor.item) {
+      editor.item.selectAll()
+      editor.item.forceActiveFocus()
+    }
   }
 
   function lookup() {
-    var query = field.text.trim()
-    if (!editing || query.length < 2 || coordinates(query)) {
+    var city = query.trim()
+    if (!editing || city.length < 2 || coordinates(city)) {
       suggestions = []
       return
     }
-    pendingQuery = query
+    pendingQuery = city
     if (!geocoder.running) startLookup()
   }
 
   function startLookup() {
-    if (!editing || pendingQuery.length < 2 || pendingQuery !== field.text.trim()) return
+    if (!editing || pendingQuery.length < 2 || pendingQuery !== query.trim()) return
     activeRevision = revision
     activeQuery = pendingQuery
     geocoder.command = ["curl", "-fsS", "--max-time", "5",
@@ -71,14 +76,14 @@ Column {
     search.stop()
     error = ""
     suggestions = []
-    field.text = suggestion.name
+    query = suggestion.name
     save(suggestion.latitude + " " + suggestion.longitude, suggestion.name)
   }
 
   // Enter takes the highlighted city. Coordinates still work for anyone who
   // pastes them, without being something the UI asks for.
   function commit() {
-    var position = coordinates(field.text)
+    var position = coordinates(query)
     if (position) {
       revision++
       editing = false
@@ -91,7 +96,7 @@ Column {
       return
     }
     if (search.running || geocoder.running) return
-    error = field.text.trim() === "" ? "Type a town or city" : "No places found. Try a nearby town."
+    error = query.trim() === "" ? "Type a town or city" : "No places found. Try a nearby town."
   }
 
   function coordinates(text) {
@@ -128,7 +133,7 @@ Column {
     onExited: function(code) {
       Qt.callLater(function() {
         if (!root.editing) return
-        if (root.activeRevision !== root.revision || root.activeQuery !== field.text.trim()) {
+        if (root.activeRevision !== root.revision || root.activeQuery !== root.query.trim()) {
           if (!search.running) root.lookup()
           return
         }
@@ -176,35 +181,46 @@ Column {
     font.pixelSize: Style.font.caption
   }
 
-  TextField {
-    id: field
-    visible: root.manual
+  Loader {
+    id: editor
+    active: root.visible && root.editing
+    visible: active
     width: parent.width
-    placeholderText: "Search city"
-    foreground: root.foreground
-    font.family: root.fontFamily
-    Accessible.name: "Search for your town or city"
-    onTextEdited: {
-      root.revision++
-      root.suggestions = []
-      root.highlighted = 0
-      root.error = ""
-      root.editing = true
-      search.restart()
+    onLoaded: {
+      item.selectAll()
+      item.forceActiveFocus()
     }
-    Keys.onPressed: function(event) {
-      if (event.key === Qt.Key_Down) {
-        root.highlighted = Math.max(0, Math.min(root.highlighted + 1, root.suggestions.length - 1))
-      } else if (event.key === Qt.Key_Up) {
-        root.highlighted = Math.max(root.highlighted - 1, 0)
-      } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-        root.commit()
-      } else if (event.key === Qt.Key_Escape && root.editing && root.source === "manual") {
-        root.reset()
-      } else {
-        return
+
+    sourceComponent: TextField {
+      text: root.query
+      placeholderText: "Search city"
+      foreground: root.foreground
+      font.family: root.fontFamily
+      // Qt reads clipboard text for canPaste even when an editable field is hidden.
+      readOnly: !root.visible || !root.editing || !activeFocus
+      Accessible.name: "Search for your town or city"
+      onTextEdited: {
+        root.query = text
+        root.revision++
+        root.suggestions = []
+        root.highlighted = 0
+        root.error = ""
+        search.restart()
       }
-      event.accepted = true
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Down) {
+          root.highlighted = Math.max(0, Math.min(root.highlighted + 1, root.suggestions.length - 1))
+        } else if (event.key === Qt.Key_Up) {
+          root.highlighted = Math.max(root.highlighted - 1, 0)
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+          root.commit()
+        } else if (event.key === Qt.Key_Escape && root.editing) {
+          root.reset()
+        } else {
+          return
+        }
+        event.accepted = true
+      }
     }
   }
 
