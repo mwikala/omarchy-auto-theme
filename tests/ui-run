@@ -10,11 +10,14 @@ trap 'rm -rf "$sandbox"' EXIT
 for module in Commons Ui; do
     ln -s "${OMARCHY_PATH:-/usr/share/omarchy}/shell/$module" "$sandbox/$module"
 done
-cp "$root"/{Choice,Location,Segments,Warmth}.qml "$sandbox/"
+cp "$root"/{Choice,Entry,Hint,Location,Segments,Warmth}.qml "$sandbox/"
 cp "$root/tests/ui.qml" "$sandbox/shell.qml"
 mkdir "$sandbox/bin"
 cp "$root/tests/ui-curl" "$sandbox/bin/curl"
-PATH="$sandbox/bin:$PATH" QT_QPA_PLATFORM=offscreen timeout 10 quickshell -p "$sandbox/shell.qml" --no-color >"$sandbox/log" 2>&1
+cp "$root/bin/omarchy-auto-theme-io" "$sandbox/bin/"
+cp "$root/tests/ui-paste" "$sandbox/bin/wl-paste"
+PATH="$sandbox/bin:$PATH" AUTO_THEME_UI_PASTES="$sandbox/pastes" QT_QPA_PLATFORM=offscreen timeout 10 quickshell -p "$sandbox/shell.qml" --no-color >"$sandbox/log" 2>&1
 cat "$sandbox/log"
 grep -q 'PASS: popup widths' "$sandbox/log"
 ! grep -Eq 'FAIL:|ERROR:|ReferenceError|TypeError|Unable to assign' "$sandbox/log"
+[[ $(wc -l <"$sandbox/pastes") -eq 3 ]]

@@ -28,6 +28,7 @@ found automatically; there is nothing to set up.
 `sunwait` is an AUR dependency. Other runtime dependencies are Bash, GNU coreutils,
 findutils, awk, grep, jq, curl, util-linux (`flock`), systemd user services, and
 Omarchy's theme/shell commands. Night light uses Omarchy's `hyprsunset`.
+Explicit clipboard paste uses `wl-paste` from `wl-clipboard`, normally provided by Omarchy.
 
 ```bash
 omarchy plugin update mwikala.auto-theme
@@ -79,9 +80,19 @@ your connection's IP address. Search requests are debounced; no API key is
 needed for personal use.
 
 The city-search field exists only while explicitly editing. Saving, cancelling,
-closing the panel, or switching to Automatic destroys it. Unfocused input is
-read-only to avoid Qt's background clipboard checks; focused editing uses Qt's
-normal clipboard implementation. To change a saved city, click **Manual** again.
+closing the panel, or switching to Automatic destroys it. It remains read-only
+at the Qt level even while focused: bounded key-event edits avoid native clipboard
+checks. Ctrl+V, Shift+Insert, and middle-click request an asynchronous paste through
+an isolated helper, capped at 512 raw bytes and 128 characters, with a two-second
+deadline (plus one second to force termination) and 128 MiB address-space limit.
+No clipboard text is requested merely by opening or focusing the controls.
+Ordinary Unicode keyboard events are supported; IME composition is not. Paste
+composed text explicitly instead. To change a saved city, click **Manual** again.
+
+IP and geocoding responses are capped at 32 KiB before entering the shell UI.
+Requests are HTTPS-only, ignore curl configuration, and have a five-second outer
+deadline (plus one second to force termination). City results are limited to five
+validated entries, with display strings no longer than 128 characters.
 
 The plugin stores configuration in `~/.config/omarchy/auto-theme/config` and
 runtime state, including cached coordinates, under
@@ -148,6 +159,7 @@ Hiding or disabling a bar widget is not an uninstall. Run the engine's
 ```bash
 tests/run
 tests/ui-run
+tests/io-run
 omarchy plugin validate .
 ```
 
@@ -161,6 +173,10 @@ application, not your desktop clipboard:
 ```bash
 tests/clipboard-run
 ```
+
+The native check loads the actual `Entry.qml`, keeps it focused while simulating
+typing, undo, selection, and paste shortcuts, and asserts zero native clipboard
+reads. See [SECURITY.md](SECURITY.md) for the review scope and residual risks.
 
 ## License
 

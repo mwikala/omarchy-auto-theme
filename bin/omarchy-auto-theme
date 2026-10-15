@@ -67,6 +67,7 @@ read_config() {
 
     load_defaults
     if [[ -f "$CONFIG_FILE" ]]; then
+        [[ $(stat -c %s "$CONFIG_FILE") -le 65536 ]] || die "Auto Theme config exceeds 64 KiB."
         while IFS= read -r line || [[ -n "$line" ]]; do
             [[ "$line" =~ ^[[:space:]]*([A-Z_]+)=(.*)$ ]] || continue
             key="${BASH_REMATCH[1]}"
@@ -76,6 +77,7 @@ read_config() {
             else
                 value="${value%"${value##*[![:space:]]}"}"
             fi
+            [[ ${#value} -le 256 ]] || die "Auto Theme config values must be at most 256 characters."
 
             case " ${CONFIG_KEYS[*]} " in
                 *" $key "*) printf -v "$key" '%s' "$value" ;;
@@ -106,7 +108,7 @@ save_config() {
     } >"$tmp" && mv "$tmp" "$target" || { rm -f "$tmp"; die "Could not write $CONFIG_FILE"; }
 }
 
-valid_text() { [[ "$1" != *[$'\n\r"']* ]]; }
+valid_text() { [[ ${#1} -le 256 && "$1" != *\"* && ! "$1" =~ [[:cntrl:]] ]]; }
 
 valid_location() {
     [[ "$1" =~ ^(-?[0-9]+(\.[0-9]+)?)[[:space:]]+(-?[0-9]+(\.[0-9]+)?)$ ]] || return 1
@@ -115,7 +117,7 @@ valid_location() {
 }
 
 valid_temperature() {
-    [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 >= MIN_TEMPERATURE && 10#$1 <= MAX_TEMPERATURE ))
+    [[ "$1" =~ ^[0-9]{4}$ ]] && (( 10#$1 >= MIN_TEMPERATURE && 10#$1 <= MAX_TEMPERATURE ))
 }
 
 atomic_write() {
@@ -126,7 +128,7 @@ atomic_write() {
     printf '%s\n' "$2" >"$tmp" && mv "$tmp" "$file"
 }
 
-state() { cat "$STATE_DIR/$1" 2>/dev/null; }
+state() { head -c 512 "$STATE_DIR/$1" 2>/dev/null; }
 set_state() { atomic_write "$STATE_DIR/$1" "$2"; }
 
 needs_migration() {
@@ -169,10 +171,10 @@ lookup_ip() {
         return 1
     fi
 
-    answer=$(unlocked curl -fsS --max-time 5 https://ipinfo.io/json 2>/dev/null)
-    loc=$(jq -r '.loc // empty' <<<"$answer" 2>/dev/null)
+    answer=$(unlocked "$SCRIPT_DIR/omarchy-auto-theme-io" ip 2>/dev/null)
+    loc=$(jq -er '.loc | select(type == "string" and length <= 64)' <<<"$answer" 2>/dev/null)
     loc="${loc%%,*} ${loc#*,}"
-    place=$(jq -r '.city // .region // .country // empty' <<<"$answer" 2>/dev/null | tr -d '[:cntrl:]')
+    place=$(jq -r '[.city, .region, .country] | map(select(type == "string" and length > 0 and length <= 128 and (test("[\u0000-\u001f\u007f-\u009f]") | not))) | .[0] // ""' <<<"$answer" 2>/dev/null)
     if valid_location "$loc"; then
         rm -f "$IP_FAILED"
         atomic_write "$IP_CACHE" "$loc"
@@ -201,7 +203,7 @@ locate() {
     fi
 
     [[ "$LOCATION_LOOKUP" == ip && -f "$IP_CACHE" ]] || return 1
-    COORDS=$(<"$IP_CACHE")
+    COORDS=$(head -c 64 "$IP_CACHE")
     valid_location "$COORDS" || { COORDS=""; return 1; }
 }
 
@@ -223,7 +225,7 @@ location_source() {
 place() {
     case "$(location_source)" in
         manual) echo "$LOCATION_NAME" ;;
-        ip) [[ -n "$COORDS" ]] && cat "$IP_PLACE" 2>/dev/null ;;
+        ip) [[ -n "$COORDS" ]] && head -c 512 "$IP_PLACE" 2>/dev/null ;;
     esac
 }
 
@@ -307,12 +309,13 @@ theme_for() { [[ "$1" == light ]] && echo "$LIGHT_THEME" || echo "$DARK_THEME"; 
 background_for() { [[ "$1" == light ]] && echo "$LIGHT_BACKGROUND" || echo "$DARK_BACKGROUND"; }
 theme_var() { [[ "$1" == light ]] && echo LIGHT_THEME || echo DARK_THEME; }
 background_var() { [[ "$1" == light ]] && echo LIGHT_BACKGROUND || echo DARK_BACKGROUND; }
-current_theme() { cat "$CURRENT_DIR/theme.name" 2>/dev/null; }
+current_theme() { head -c 256 "$CURRENT_DIR/theme.name" 2>/dev/null; }
 
 # Same normalisation as omarchy-theme-set.
 theme_slug() { sed -E 's/<[^>]+>//g' <<<"$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-'; }
 
 theme_exists() { omarchy-theme-list 2>/dev/null | grep -Fxq -- "$1"; }
+theme_list() { omarchy-theme-list 2>/dev/null | head -n 128; }
 
 # Mirrors the search order in omarchy-theme-bg-next, so a pinned background is a
 # path that script recognises and keeps cycling from.
@@ -329,7 +332,7 @@ background_list() {
     local dirs=()
 
     mapfile -t dirs < <(background_dirs "$1")
-    find -L "${dirs[@]}" -maxdepth 1 -type f \( "${IMAGE_TYPES[@]}" \) -printf '%f\n' 2>/dev/null | sort -u
+    find -L "${dirs[@]}" -maxdepth 1 -type f \( "${IMAGE_TYPES[@]}" \) -printf '%f\n' 2>/dev/null | head -n 128 | sort -u
 }
 
 background_path() {
@@ -445,12 +448,25 @@ render_unit() {
     printf '%s\n%s\n' "$UNIT_MARKER" "$content"
 }
 
-ours() { [[ -L "$1" ]] || { [[ -f "$1" ]] && grep -Fxq "$UNIT_MARKER" "$1"; }; }
+ours() {
+    if [[ -L "$1" ]]; then
+        [[ "$(readlink -f "$1")" == "$(readlink -f "$UNIT_SOURCE/$(basename "$1")")" ]]
+        return
+    fi
+    [[ -f "$1" ]] && grep -Fxq "$UNIT_MARKER" "$1"
+}
 
 install_units() {
     local unit file content changed=0
 
     mkdir -p "$USER_UNITS"
+    for unit in "$SERVICE" "$TIMER"; do
+        file="$USER_UNITS/$unit"
+        if [[ -e "$file" || -L "$file" ]] && ! ours "$file"; then
+            echo "Refusing to replace user-owned unit: $file" >&2
+            return 1
+        fi
+    done
     for unit in "$SERVICE" "$TIMER"; do
         file="$USER_UNITS/$unit"
         content=$(render_unit "$unit") || { echo "Missing unit template: $UNIT_SOURCE/$unit" >&2; return 1; }
@@ -473,7 +489,9 @@ stop_next_timers() {
 }
 
 disable_timer() {
-    systemctl --user disable --now "$TIMER" >/dev/null 2>&1
+    if [[ ! -e "$USER_UNITS/$TIMER" && ! -L "$USER_UNITS/$TIMER" ]] || ours "$USER_UNITS/$TIMER"; then
+        systemctl --user disable --now "$TIMER" >/dev/null 2>&1
+    fi
     stop_next_timers
     rm -f "$STATE_DIR/scheduled"
 }
@@ -582,6 +600,7 @@ enable_auto_theme() {
     locate
     require_sun
     phase=$(sun_phase) || die "sunwait could not tell whether it is day or night."
+    install_units || exit 1
     set_theme "$phase" || exit 1
     set_state auto 1
     sync_timer || exit 1
@@ -635,6 +654,7 @@ set_nightlight_mode() {
     if [[ "$1" == auto ]]; then
         require_sun
         phase=$(sun_phase) || die "sunwait could not tell whether it is day or night."
+        install_units || exit 1
     fi
 
     NIGHTLIGHT="$1"
@@ -718,7 +738,7 @@ preview_watchdog() {
 set_config() {
     local slot="$1" value="$2" mode
 
-    valid_text "$value" || die "Values cannot contain quotes or line breaks."
+    valid_text "$value" || die "Values must be at most 256 characters without quotes or control characters."
 
     lock
     read_config
@@ -773,7 +793,7 @@ set_location() {
         off) ;;
         *)
             valid_location "$choice" || die "Enter latitude and longitude, like 51.51 -0.13"
-            valid_text "$name" || die "Location names cannot contain quotes or line breaks."
+            valid_text "$name" || die "Location names must be at most 256 characters without quotes or control characters."
             ;;
     esac
 
@@ -798,23 +818,32 @@ set_location() {
 }
 
 remove_unit() {
-    local file="$USER_UNITS/$1"
+    local file="$USER_UNITS/$1" link target
 
-    ours "$file" && rm -f "$file"
-    rm -f "$USER_UNITS/timers.target.wants/$1" "$USER_UNITS/default.target.wants/$1"
+    ours "$file" || return 0
+    target=$(readlink -f "$file")
+    for link in "$USER_UNITS/timers.target.wants/$1" "$USER_UNITS/default.target.wants/$1"; do
+        [[ -L "$link" && "$(readlink -f "$link")" == "$target" ]] && rm -f "$link"
+    done
+    rm -f "$file"
 }
 
 uninstall() {
+    local units=("$NEXT_PREFIX-*")
     case "$1" in ""|--purge) ;; *) die "Usage: omarchy-auto-theme uninstall [--purge]" ;; esac
 
     lock
+    ours "$USER_UNITS/$TIMER" && units+=("$TIMER")
+    ours "$USER_UNITS/$SERVICE" && units+=("$SERVICE")
     disable_timer
-    systemctl --user stop "$SERVICE" >/dev/null 2>&1
-    systemctl --user disable "$SERVICE" >/dev/null 2>&1
+    if ours "$USER_UNITS/$SERVICE"; then
+        systemctl --user stop "$SERVICE" >/dev/null 2>&1
+        systemctl --user disable "$SERVICE" >/dev/null 2>&1
+    fi
     remove_unit "$TIMER"
     remove_unit "$SERVICE"
     systemctl --user daemon-reload >/dev/null 2>&1
-    systemctl --user reset-failed "$TIMER" "$SERVICE" "$NEXT_PREFIX-*" >/dev/null 2>&1
+    systemctl --user reset-failed "${units[@]}" >/dev/null 2>&1
     rm -f "$PREVIEW_FILE"
 
     [[ "$1" == --purge ]] && rm -rf "$CONFIG_DIR" "$STATE_DIR"
@@ -837,7 +866,7 @@ panel_json() {
     [[ -z "$issue" && -z "$sunrise$sunset" ]] && issue=polar
 
     read -r at event <<<"$(state scheduled)"
-    if ! [[ "$at" =~ ^[0-9]+$ ]] || (( at + 60 <= $(date +%s) )); then
+    if ! [[ "$at" =~ ^[0-9]{1,12}$ ]] || (( at + 60 <= $(date +%s) )); then
         at="" event=""
         [[ -z "$issue" ]] && read -r at event < <(next_event)
     fi
@@ -941,6 +970,7 @@ case "$1" in
     location) set_location "$2" "$3" ;;
     locate) read_config; refresh_location ;;
     panel-json) panel_json ;;
+    themes) theme_list ;;
     status) status ;;
     schedule) lock; read_config; locate; schedule_next ;;
     *) usage >&2; exit 1 ;;

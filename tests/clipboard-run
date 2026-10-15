@@ -7,5 +7,5 @@ base="${TMPDIR:-/tmp}"
 sandbox=$(mktemp -d "$base/auto-theme-clipboard.XXXXXX")
 trap 'rm -rf "$sandbox"' EXIT
 
-"${CXX:-c++}" -fPIC "$root/tests/clipboard.cpp" -o "$sandbox/check" $(pkg-config --cflags --libs Qt6Quick Qt6Qml Qt6Gui)
-QT_QPA_PLATFORM=offscreen timeout 10 "$sandbox/check"
+"${CXX:-c++}" -fPIC "$root/tests/clipboard.cpp" -o "$sandbox/check" $(pkg-config --cflags --libs Qt6Quick Qt6Qml Qt6Gui Qt6Test)
+QT_QPA_PLATFORM=offscreen timeout 10 "$sandbox/check" "$root/Entry.qml"

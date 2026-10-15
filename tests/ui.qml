@@ -14,6 +14,7 @@ ShellRoot {
     property var failures: []
     property bool restored: false
     property var saved: ({})
+    property string draft: ""
 
     function check(condition, message) {
       if (!condition) failures.push(message)
@@ -69,6 +70,7 @@ ShellRoot {
       }
       Location { id: city; width: 360 }
       Warmth { id: warmth; width: 360 }
+      Hint { id: hint; text: "<img src='https://example.invalid/tracker'>" }
     }
 
     Connections {
@@ -86,6 +88,7 @@ ShellRoot {
       running: true
       onTriggered: {
         window.check(!window.input(city), "automatic location must not create an input")
+        window.check(hint.contentItem.textFormat === Text.PlainText && hint.contentItem.text === hint.text, "tooltip markup must remain literal")
         city.source = "manual"
         city.place = "London"
         window.check(!window.input(city), "saved manual location must not create an input")
@@ -96,12 +99,17 @@ ShellRoot {
         choice.forceActiveFocus()
         window.check(field && field.readOnly, "unfocused input must not read clipboard text")
         if (field) field.forceActiveFocus()
-        window.check(field && !field.readOnly, "focused manual input must remain editable")
+        window.check(field && field.readOnly, "focused input must never enable native clipboard reads")
         city.source = "ip"
         window.check(choice.menuWidth() > choice.width, "long names must widen popup")
+        window.check(!choice.editable, "theme pickers must not create writable native input")
         window.check(city.coordinates("51.51, -0.13") === "51.51 -0.13", "coordinate normalization")
         window.check(city.coordinates("91, 2") === "", "coordinate bounds")
         window.check(city.results('{"results":[{"name":"Invalid","latitude":999,"longitude":2}]}').length === 0, "geocoder validation")
+        window.check(city.results('{"results":{}}').length === 0, "non-array geocoder results must be rejected")
+        window.check(city.results('{"results":[null,{}, {"name":"Bad","admin1":{},"latitude":1,"longitude":2}]}').length === 0, "invalid geocoder shapes must be rejected")
+        window.check(city.results(JSON.stringify({ results: [{ name: "x".repeat(129), latitude: 1, longitude: 2 }] })).length === 0, "long geocoder names must be rejected")
+        window.check(city.results(JSON.stringify({ results: Array(20).fill({ name: "City", latitude: 1, longitude: 2 }) })).length === 5, "geocoder collections must be bounded")
         city.editing = true
         city.revision = 3
         city.reset()
@@ -158,7 +166,7 @@ ShellRoot {
         var field = window.input(city)
         if (field) {
           field.text = "Berlin"
-          field.textEdited()
+          field.edited()
         }
         window.check(city.query === "Berlin", "editing must update the search query")
         city.pick({ name: "Berlin", latitude: 52.52, longitude: 13.41 })
@@ -177,8 +185,43 @@ ShellRoot {
         for (var child of city.children)
           if (child.caption === "Location") child.selected("auto")
         window.check(!window.input(city) && !city.editing, "automatic mode must destroy the input")
+        city.edit()
+        city.paste(false)
+      }
+    }
+
+    Timer {
+      interval: 1400
+      running: true
+      onTriggered: {
+        window.check(city.query === "Berlin", "explicit paste must insert bounded text")
+        var field = window.input(city)
+        field.selectAll()
+        field.replace("Paris")
+        city.paste(false)
+        field.replace("X")
+        window.draft = city.query
+      }
+    }
+
+    Timer {
+      interval: 1700
+      running: true
+      onTriggered: {
+        window.check(city.query === window.draft, "paste must not overwrite edits made while reading")
+        city.paste(false)
+        controls.visible = false
+      }
+    }
+
+    Timer {
+      interval: 2100
+      running: true
+      onTriggered: {
+        controls.visible = true
+        window.check(!window.input(city) && !city.editing, "late paste must not recreate a closed input")
         console.log(window.failures.length ? "FAIL: " + window.failures.join(", ")
-          : "PASS: popup widths, palette changes, screen bounds, coordinates, geocoder validation, city-search races, editor lifetime, slider reset")
+          : "PASS: popup widths, palette changes, screen bounds, coordinates, geocoder validation, city-search races, editor lifetime, bounded paste, literal tooltips, slider reset")
         Qt.quit()
       }
     }

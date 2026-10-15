@@ -24,6 +24,7 @@ Column {
   property int revision: 0
   property int activeRevision: -1
   readonly property bool manual: editing || source === "manual"
+  readonly property string io: decodeURIComponent(Qt.resolvedUrl("bin/omarchy-auto-theme-io").toString().replace(/^file:\/\//, ""))
 
   signal save(string coordinates, string name)
   signal automatic()
@@ -64,8 +65,7 @@ Column {
     if (!editing || pendingQuery.length < 2 || pendingQuery !== query.trim()) return
     activeRevision = revision
     activeQuery = pendingQuery
-    geocoder.command = ["curl", "-fsS", "--max-time", "5",
-      "https://geocoding-api.open-meteo.com/v1/search?count=5&language=en&format=json&name=" + encodeURIComponent(activeQuery)]
+    geocoder.command = [io, "city", activeQuery]
     geocoder.running = true
   }
 
@@ -109,8 +109,14 @@ Column {
   }
 
   function results(raw) {
+    if (raw.length > 32768) return []
     try {
-      return (JSON.parse(raw).results || []).filter(function(entry) {
+      var places = JSON.parse(raw).results
+      if (!Array.isArray(places)) return []
+      return places.slice(0, 5).filter(function(entry) {
+        if (!entry || !label(entry.name)) return false
+        if (entry.admin1 !== undefined && !label(entry.admin1)) return false
+        if (entry.country !== undefined && !label(entry.country)) return false
         return typeof entry.name === "string" && typeof entry.latitude === "number" && typeof entry.longitude === "number"
           && isFinite(entry.latitude) && isFinite(entry.longitude)
           && Math.abs(entry.latitude) <= 90 && Math.abs(entry.longitude) <= 180
@@ -124,6 +130,31 @@ Column {
       })
     } catch (e) {
       return []
+    }
+  }
+
+  function label(text) {
+    return typeof text === "string" && text.length > 0 && text.length <= 128
+      && !/["\u0000-\u001f\u007f-\u009f]/.test(text)
+  }
+
+  function paste(primary) {
+    if (!editing || !visible || !editor.item || clipboard.running) return
+    clipboard.revision = revision
+    clipboard.command = primary ? [io, "clipboard", "primary"] : [io, "clipboard"]
+    clipboard.running = true
+  }
+
+  Process {
+    id: clipboard
+    property int revision: -1
+    stdout: StdioCollector { id: pasted; waitForEnd: true }
+    onExited: function(code) {
+      if (!root.editing || !root.visible || !editor.item || !editor.item.activeFocus || revision !== root.revision) return
+      if (code !== 0) { root.error = "Couldn't paste. Use a short city name or coordinates."; return }
+      try {
+        if (!editor.item.replace(JSON.parse(pasted.text))) root.error = "Use at most 128 characters on one line."
+      } catch (e) { root.error = "Couldn't read clipboard text." }
     }
   }
 
@@ -191,15 +222,21 @@ Column {
       item.forceActiveFocus()
     }
 
-    sourceComponent: TextField {
+    sourceComponent: Entry {
       text: root.query
       placeholderText: "Search city"
-      foreground: root.foreground
+      color: root.foreground
       font.family: root.fontFamily
-      // Qt reads clipboard text for canPaste even when an editable field is hidden.
-      readOnly: !root.visible || !root.editing || !activeFocus
+      font.pixelSize: Style.font.body
+      topPadding: Style.spacing.inputPaddingY + frame.borderTop
+      bottomPadding: Style.spacing.inputPaddingY + frame.borderBottom
+      leftPadding: Style.spacing.controlPaddingX + frame.borderLeft
+      rightPadding: Style.spacing.controlPaddingX + frame.borderRight
+      selectionColor: Style.selectionFillFor(root.foreground, Commons.Color.accent)
+      selectedTextColor: root.foreground
       Accessible.name: "Search for your town or city"
-      onTextEdited: {
+      onPasteRequested: function(primary) { root.paste(primary) }
+      onEdited: {
         root.query = text
         root.revision++
         root.suggestions = []
@@ -207,19 +244,27 @@ Column {
         root.error = ""
         search.restart()
       }
-      Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Down) {
+      onNavigated: function(key) {
+        if (key === Qt.Key_Down) {
           root.highlighted = Math.max(0, Math.min(root.highlighted + 1, root.suggestions.length - 1))
-        } else if (event.key === Qt.Key_Up) {
+        } else if (key === Qt.Key_Up) {
           root.highlighted = Math.max(root.highlighted - 1, 0)
-        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+        } else if (key === Qt.Key_Return || key === Qt.Key_Enter) {
           root.commit()
-        } else if (event.key === Qt.Key_Escape && root.editing) {
+        } else if (key === Qt.Key_Escape && root.editing) {
           root.reset()
         } else {
           return
         }
-        event.accepted = true
+      }
+
+      BorderSurface {
+        id: frame
+        z: -1
+        anchors.fill: parent
+        radius: Style.cornerRadius
+        color: Style.controlFill(parent.activeFocus, false, root.foreground, Commons.Color.accent)
+        borderSpec: Border.controlSpec(parent.activeFocus ? "focus" : "normal", root.foreground, Commons.Color.accent)
       }
     }
   }

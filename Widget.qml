@@ -263,7 +263,7 @@ Panel {
 
   Process {
     id: themesProc
-    command: ["omarchy-theme-list"]
+    command: [root.script, "themes"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.themes = String(text || "").split("\n").filter(function(line) { return line.trim() !== "" })
@@ -366,7 +366,7 @@ Panel {
             font.weight: Font.Medium
             elide: Text.ElideRight
             HoverHandler { id: themeHover }
-            PanelToolTip {
+            Hint {
               visible: themeHover.hovered
               text: root.themeFor(root.mode)
             }
@@ -400,7 +400,7 @@ Panel {
               font.underline: schedule.activeFocus
             }
 
-            PanelToolTip {
+            Hint {
               visible: scheduleHover.hovered && !root.locationOpen
               text: {
                 if (root.issue === "sunwait") return "Install sunwait from the AUR to enable Auto"
@@ -468,7 +468,7 @@ Panel {
             fontSize: Style.font.icon
             color: root.nightlightActive ? root.foreground : root.dim
             HoverHandler { id: nightHover }
-            PanelToolTip {
+            Hint {
               visible: nightHover.hovered
               text: "Night light"
             }
@@ -493,7 +493,7 @@ Panel {
               acceptedButtons: Qt.LeftButton | Qt.MiddleButton
               onTapped: root.toggleTemperatureDisplay()
             }
-            PanelToolTip {
+            Hint {
               visible: readoutHover.hovered
               text: root.formatWarmth(root.shownTemperature, root.temperatureDisplay === "kelvin" ? "name" : "kelvin")
             }
@@ -524,7 +524,7 @@ Panel {
           onCommitted: function(kelvin) { root.saveTemperature(kelvin) }
           onCancelled: root.cancelPreview()
           HoverHandler { id: warmthHover }
-          PanelToolTip {
+          Hint {
             visible: warmthHover.hovered && !slider.dragging
             text: "Warmer to the right · double-click to reset"
           }
@@ -632,7 +632,7 @@ Panel {
                   fontFamily: root.fontFamily
                   onChanged: function(selected) { root.chooseTheme(themeRow.modelData, selected) }
                   HoverHandler { id: choiceHover }
-                  PanelToolTip {
+                  Hint {
                     visible: choiceHover.hovered && !parent.popupOpen
                     text: root.themeFor(themeRow.modelData)
                   }
@@ -647,7 +647,7 @@ Panel {
                   fontFamily: root.fontFamily
                   onChanged: function(selected) { root.chooseBackground(themeRow.modelData, selected) }
                   HoverHandler { id: backgroundHover }
-                  PanelToolTip {
+                  Hint {
                     visible: backgroundHover.hovered && !parent.popupOpen
                     text: "Background: " + (root.backgroundFor(themeRow.modelData) || "Default")
                   }

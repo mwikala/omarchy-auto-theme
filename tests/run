@@ -24,7 +24,7 @@ setup() {
     UNITS="$HOME/.config/systemd/user"
 
     mkdir -p "$HOME" "$PLUGIN/bin" "$MOCK" "$S" "$(dirname "$CURRENT_THEME")"
-    cp "$ROOT/bin/omarchy-auto-theme" "$PLUGIN/bin/"
+    cp "$ROOT/bin/omarchy-auto-theme" "$ROOT/bin/omarchy-auto-theme-io" "$PLUGIN/bin/"
     cp -r "$ROOT/systemd" "$PLUGIN/"
     for tool in "${REAL_TOOLS[@]}"; do ln -s "$(command -v "$tool")" "$MOCK/$tool"; done
     cp -r "$ROOT/tests/mocks/." "$MOCK/"
@@ -40,7 +40,7 @@ teardown() {
 }
 
 cli() {
-    OUT=$(env -i HOME="$HOME" PATH="$MOCK" MOCK_STATE="$S" "$PLUGIN/bin/omarchy-auto-theme" "$@" 2>"$T/stderr")
+    OUT=$(env -i HOME="$HOME" PATH="$MOCK" XDG_RUNTIME_DIR="$T" MOCK_STATE="$S" "$PLUGIN/bin/omarchy-auto-theme" "$@" 2>"$T/stderr")
     RC=$?
     ERR=$(<"$T/stderr")
 }
@@ -151,7 +151,7 @@ test_automatic_location() {
     echo "$IPINFO" >"$S/curl"
     cli locate
     check "locate succeeds" equals "$RC" 0
-    check "uses https ipinfo" has_call "curl -fsS --max-time 5 https://ipinfo.io/json"
+    check "uses bounded https ipinfo" has_call "curl -q -fsS --proto =https --connect-timeout 2 --max-time 4 --max-filesize 32768 https://ipinfo.io/json"
     check "locate saves no settings" test ! -e "$CONFIG"
     cli panel-json
     check "panel shows place" equals "$(json .location)|$(json .place)|$(json .locationSource)" "53.7997 -1.5492|Leeds|ip"
@@ -385,10 +385,49 @@ test_legacy_linked_units_are_replaced() {
     configure 'LOCATION="51.5 -0.12"'
     mkdir -p "$UNITS"
     ln -s "$PLUGIN/systemd/omarchy-auto-theme.service" "$UNITS/omarchy-auto-theme.service"
-    echo "custom" >"$UNITS/omarchy-auto-theme.timer"
     cli enable
     check "symlink replaced by generated unit" test ! -L "$UNITS/omarchy-auto-theme.service"
+}
+
+test_user_owned_units_are_preserved() {
+    configure 'LOCATION="51.5 -0.12"'
+    mkdir -p "$UNITS/timers.target.wants"
+    echo "custom" >"$T/custom.service"
+    ln -s "$T/custom.service" "$UNITS/omarchy-auto-theme.service"
+    echo "custom" >"$UNITS/omarchy-auto-theme.timer"
+    ln -s ../omarchy-auto-theme.timer "$UNITS/timers.target.wants/omarchy-auto-theme.timer"
+    cli enable
+    check "enable refuses foreign units" test "$RC" -ne 0
+    check "foreign symlink unchanged" test -L "$UNITS/omarchy-auto-theme.service"
     check "user's own unit left alone" equals "$(cat "$UNITS/omarchy-auto-theme.timer")" custom
+    reset_calls
+    cli uninstall
+    check "custom service not stopped" no_call "systemctl --user stop omarchy-auto-theme.service"
+    check "custom timer not disabled" no_call "systemctl --user disable --now omarchy-auto-theme.timer"
+    check "custom wants link retained" test -L "$UNITS/timers.target.wants/omarchy-auto-theme.timer"
+    check "custom service link retained" test -L "$UNITS/omarchy-auto-theme.service"
+}
+
+test_remote_location_limits() {
+    head -c 32769 /dev/zero | tr '\0' 'x' >"$S/curl"
+    cli locate
+    check "oversize response rejected" test "$RC" -ne 0
+    check "oversize response not cached" test ! -e "$STATE/location.cache"
+    rm -f "$STATE/location.failed"
+    echo '{"loc":"53.7,-1.3","city":{"name":"wrong type"},"country":"GB"}' >"$S/curl"
+    cli locate
+    cli panel-json
+    check "invalid place skipped" equals "$(json .place)" GB
+}
+
+test_numeric_and_config_limits() {
+    cli temperature 18446744073709555616
+    check "overflowing temperature rejected" test "$RC" -ne 0
+    check "overflow causes no display call" no_call hyprctl
+    mkdir -p "$(dirname "$CONFIG")"
+    head -c 65537 /dev/zero >"$CONFIG"
+    cli panel-json
+    check "oversize config refused" test "$RC" -ne 0
 }
 
 TESTS=$(declare -F | awk '$3 ~ /^test_/ { print $3 }')

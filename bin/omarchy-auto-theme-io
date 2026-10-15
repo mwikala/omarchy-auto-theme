@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+export LC_ALL=C
+
+ulimit -v 131072
+limit=32768
+seconds=5
+case "${1:-}" in
+    ip) command=(curl -q -fsS --proto '=https' --connect-timeout 2 --max-time 4 --max-filesize "$limit" https://ipinfo.io/json) ;;
+    city)
+        query="${2:-}"
+        [[ ${#query} -le 512 ]] || exit 1
+        query=$(jq -ern --arg query "$query" '$query | select(length >= 2 and length <= 128 and (test("[\u0000-\u001f\u007f-\u009f]") | not)) | @uri')
+        command=(curl -q -fsS --proto '=https' --connect-timeout 2 --max-time 4 --max-filesize "$limit"
+            "https://geocoding-api.open-meteo.com/v1/search?count=5&language=en&format=json&name=$query")
+        ;;
+    clipboard)
+        limit=512
+        seconds=2
+        command=(wl-paste --no-newline --type text/plain)
+        case "${2:-}" in "") ;; primary) command+=(--primary) ;; *) exit 1 ;; esac
+        ;;
+    *) exit 1 ;;
+esac
+
+buffer=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/auto-theme-io.XXXXXX")
+trap 'rm -f "$buffer"' EXIT
+# Count raw bytes before decoding or shell command substitution can discard them.
+timeout -k 1 "$seconds" "${command[@]}" 2>/dev/null | head -c "$((limit + 1))" >"$buffer"
+[[ $(stat -c %s "$buffer") -le $limit ]] || exit 1
+if [[ "$1" == clipboard ]]; then
+    jq -Rsec 'select(length > 0 and length <= 128 and (test("[\u0000-\u001f\u007f-\u009f]") | not))' "$buffer"
+else
+    cat "$buffer"
+fi

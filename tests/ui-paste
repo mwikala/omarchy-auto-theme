@@ -1,0 +1,4 @@
+#!/bin/bash
+echo paste >>"$AUTO_THEME_UI_PASTES"
+sleep 0.15
+printf Berlin

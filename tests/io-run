@@ -1,0 +1,34 @@
+#!/bin/bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+base="${TMPDIR:-/tmp}"
+[[ -d /tmp/opencode ]] && base=/tmp/opencode
+sandbox=$(mktemp -d "$base/auto-theme-io-test.XXXXXX")
+trap 'rm -rf "$sandbox"' EXIT
+mkdir "$sandbox/bin"
+cp "$root/tests/io-provider" "$sandbox/bin/curl"
+cp "$root/tests/io-provider" "$sandbox/bin/wl-paste"
+export PATH="$sandbox/bin:$PATH" XDG_RUNTIME_DIR="$sandbox"
+io="$root/bin/omarchy-auto-theme-io"
+
+[[ $(IO_CASE=text "$io" clipboard) == '"Berlin"' ]]
+for mode in empty newline nul failure; do
+    if IO_CASE="$mode" "$io" clipboard >"$sandbox/output"; then
+        echo "FAIL: clipboard accepted $mode" >&2
+        exit 1
+    fi
+done
+if IO_CASE=large IO_BYTES=513 "$io" clipboard >"$sandbox/output"; then exit 1; fi
+if IO_CASE=large IO_BYTES=32769 "$io" ip >"$sandbox/output"; then exit 1; fi
+[[ $(IO_CASE=large IO_BYTES=32768 "$io" ip | wc -c) -eq 32768 ]]
+[[ $(IO_CASE=memory "$io" ip) == 131072 ]]
+if IO_CASE=failure "$io" ip >"$sandbox/output"; then exit 1; fi
+[[ ! -s "$sandbox/output" ]]
+for mode in hang drip; do
+    SECONDS=0
+    if IO_CASE="$mode" "$io" clipboard >"$sandbox/output"; then exit 1; fi
+    [[ $SECONDS -lt 5 && ! -s "$sandbox/output" ]]
+done
+if IO_CASE=text "$io" city "$(head -c 513 /dev/zero | tr '\0' x)"; then exit 1; fi
+echo 'PASS: clipboard gestures, byte limits, rejected controls, failed downloads, memory cap and total deadlines'

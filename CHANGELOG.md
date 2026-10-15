@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.3
+
+- Keep city input permanently read-only at the Qt level, including while focused. Bounded keyboard edits never enable Qt's automatic clipboard reads.
+- Read clipboard text only on Ctrl+V, Shift+Insert, or middle-click through an isolated helper: 512 raw bytes, 128 characters, a two-second deadline, and a 128 MiB address-space limit.
+- Bound IP and city-search downloads to 32 KiB, with HTTPS-only requests, transport deadlines, capped result counts, and validated display strings.
+- Own tooltip rendering now explicitly uses plain text on all supported shell versions.
+- Preserve unrelated systemd unit symlinks and reject conflicting user-owned units. Bound config, numeric input, state reads, and UI option lists.
+- Add actual focused-entry clipboard/keyboard tests, hostile-provider tests, and resource-limit regression checks.
+- City typing supports ordinary Unicode key events and bounded explicit paste; IME composition is not supported by the custom input path.
+
 ## 1.2.2
 
 - Create the city-search field only during explicit manual editing, and destroy it when saved, cancelled, hidden, or switched to Automatic.

@@ -1,0 +1,13 @@
+#!/bin/bash
+case "$IO_CASE" in
+    text) printf 'Berlin' ;;
+    empty) ;;
+    large) head -c "$IO_BYTES" /dev/zero | tr '\0' 'x' ;;
+    newline) printf 'Berlin\nLondon' ;;
+    nul) printf 'Berlin\0London' ;;
+    failure) printf '{"loc":"53.7,-1.3"}'; exit 1 ;;
+    hang) sleep 30 ;;
+    drip) while true; do printf x; sleep 0.1; done ;;
+    memory) ulimit -v ;;
+    *) exit 1 ;;
+esac

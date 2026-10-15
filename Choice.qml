@@ -38,6 +38,7 @@ ComboBox {
   font.family: fontFamily
   font.pixelSize: Style.font.body
   hoverEnabled: true
+  editable: false
   textRole: "label"
   valueRole: "value"
   model: options.map(function(option) {
@@ -112,7 +113,7 @@ ComboBox {
     leftPadding: Style.spacing.controlPaddingX
     rightPadding: Style.spacing.controlPaddingX
 
-    PanelToolTip {
+    Hint {
       visible: option.hovered && root.metricsWidth(option.modelData.label) > option.availableWidth
       text: option.modelData.label
     }
